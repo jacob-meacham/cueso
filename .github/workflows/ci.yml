@@ -1,0 +1,120 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.13]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Cache dependencies
+        uses: astral-sh/uv-cache@v2
+        with:
+          path: backend
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          uv sync --dev
+      
+      - name: Run tests with coverage
+        run: |
+          cd backend
+          uv run pytest --cov=app --cov-report=xml
+      
+      - name: Run linting
+        run: |
+          cd backend
+          uv run ruff check .
+      
+      - name: Run type checking
+        run: |
+          cd backend
+          uv run pyright .
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    if: false  # Disabled until we add frontend back
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+    
+    - name: Run linting
+      run: |
+        cd frontend
+        npm run lint
+    
+    - name: Run type checking
+      run: |
+        cd frontend
+        npm run type-check
+    
+    - name: Run tests
+      run: |
+        cd frontend
+        npm test -- --coverage --watchAll=false
+
+  test-docker-build:
+    needs: [test-backend]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Test Docker build
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        push: false
+        tags: cueso-backend:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
