@@ -1,5 +1,7 @@
 # Cueso
 
+[![Coverage Status](https://coveralls.io/repos/github/jacob-meacham/cueso/badge.svg?branch=main)](https://coveralls.io/github/jacob-meacham/cueso?branch=main)
+
 Voice/text-controlled Roku using LLMs. FastAPI backend, React PWA frontend, CLI.
 
 ## Prerequisites

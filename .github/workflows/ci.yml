@@ -23,6 +23,11 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright .
       - run: uv run pytest
+      - uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: backend/coverage.xml
+          base-path: backend
 
   frontend:
     runs-on: ubuntu-latest
