@@ -1,0 +1,11 @@
+.git
+.venv
+**/node_modules
+**/__pycache__
+frontend/dist
+backend/static
+backend/config.yml
+.cursor
+.claude
+frontend/.env.local
+frontend/.env.development

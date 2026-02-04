@@ -1,0 +1,21 @@
+services:
+  cueso:
+    build: .
+    container_name: cueso
+    ports:
+      - "8484:8484"
+    environment:
+      - CUESO_CONFIG=/app/config.yml
+    volumes:
+      - ./backend/config.yml:/app/config.yml:ro
+      - cueso-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8484/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  cueso-data:
+    driver: local

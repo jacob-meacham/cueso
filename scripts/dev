@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+echo "Installing dependencies..."
+(cd backend && uv sync --dev)
+(cd frontend && npm install)
+
+echo "Starting backend (:8483) and frontend (:8484)..."
+cleanup() { kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null; }
+trap cleanup EXIT
+
+(cd backend && exec uv run uvicorn main:app --reload --port 8483) &
+BACKEND_PID=$!
+(cd frontend && exec npm run dev) &
+FRONTEND_PID=$!
+wait

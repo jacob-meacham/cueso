@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+.env.local
+
 # C extensions
 *.so
 
@@ -94,8 +96,10 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments and config (contains secrets)
 .env
+config.yaml
+config.yml
 .venv
 env/
 venv/
@@ -145,8 +149,14 @@ Desktop.ini
 # Linux
 *~
 
+# Node
+node_modules/
+
 # Project specific
 *.log
 logs/
 temp/
 tmp/
+
+# Built frontend served by backend in production
+backend/static/

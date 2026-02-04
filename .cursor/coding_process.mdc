@@ -1,0 +1,78 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Mandatory Workflow: Change-build-debug-fix loop
+## Run build and tests
+After making code changes, run the build and tests to ensure everything passes.
+
+## Fix root issues
+When encountering problems, fix the root cause of the issue rather than just patching symptoms.
+```python
+# Bad: Patching a symptom
+if data is not None and len(data) > 0:  # Defensive check
+    process(data)
+
+# Good: Fix the root cause (ensure data is always valid upstream)
+def get_data() -> list:
+    # Ensure we never return None
+    return fetch_data() or []
+```
+
+## Document issues
+If you can't fix an issue immediately, document it in next-steps.md with details on what the problem is and how to fix it.
+
+## Commit changes
+After successfully fixing an issue, make a git commit with an appropriate commit message.
+```bash
+git add Sources/ai/fixed_file.py
+git commit -m "Fix data validation in processing module"
+```
+
+## Keep changes scoped
+Make the smallest possible change that fixes the issue. Don't mix multiple changes or introduce unrelated improvements in the same commit. 
+
+# Mandatory Workflow: Plan before code
+## Understand and clarify requirements
+Before proceeding with any code changes, ensure you fully understand the requirements. If anything is unclear or ambiguous, ask clarifying questions first.
+
+## Develop implementation plan
+Create a detailed implementation plan before writing any code. Your plan must include:
+
+- Goal summary
+- Assumptions
+- Affected files/modules
+- Step-by-step approach
+- Potential considerations (edge cases, risks, alternatives)
+
+## Present plan for review
+Present the complete plan in a clear, structured format for review.
+
+### Implementation Plan
+
+**Goal:** Add feature X to improve Y
+
+**Assumptions:**
+- Z is already implemented
+- User has permissions for X
+
+**Affected Files:**
+- `Sources/ai/features/feature_x.py` (new)
+- `Sources/ai/main.py` (modify)
+
+**Steps:**
+1. Create new class for feature X
+2. Implement core logic
+3. Add tests
+4. Register in main.py
+
+**Considerations:**
+- Edge case: What if user lacks permissions?
+- Alternative: Could implement as extension to Y
+
+# Wait for approval
+After presenting the plan, STOP and wait for explicit approval before proceeding to implementation.
+
+# Implement after approval
+Only after receiving explicit approval, generate or modify code following the approved plan. 

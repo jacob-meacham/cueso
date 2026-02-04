@@ -1,149 +1,69 @@
 # Cueso
 
-A voice/text-controlled Roku system that uses LLMs to interpret natural language commands and execute them through the Roku ECP API.
+Voice/text-controlled Roku using LLMs. FastAPI backend, React PWA frontend, CLI.
 
-## 🚀 **Progressive Development Approach**
+## Prerequisites
 
-We're building this progressively, starting with a minimal backend and adding features step by step.
+- Python 3.13+ and [uv](https://docs.astral.sh/uv/)
+- Node.js 22+
 
-### **Current Status: Phase 1 - Basic Backend**
-- ✅ Basic FastAPI server
-- ✅ Configuration management
-- ✅ Simple in-memory storage
-- ✅ Basic health endpoints
-- ✅ Testing setup
+## Quick Start
 
-### **Next Phases:**
-1. 🔄 **Roku ECP Client** - Basic device communication
-2. 🔄 **LLM Integration** - Simple query processing
-3. 🔄 **Tool Calling** - Basic tool execution
-4. 🔄 **Streaming Responses** - Real-time updates
-5. 🔄 **Frontend** - Web interface
-6. 🔄 **CLI** - Command-line interface
+    cp config.yml.example config.yml
+    # edit config.yml — add your LLM API key and Roku IP
+    ./scripts/dev
 
-## 🛠️ **Quick Start (Backend Only)**
+Backend at http://localhost:8483, frontend at http://localhost:8484.
 
-### Prerequisites
-- Python 3.13+
-- uv (Python package manager)
+## Commands
 
-### Setup
-1. **Install uv**:
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
+    # Development (install deps + start both services)
+    ./scripts/dev
 
-2. **Backend Setup**:
-   ```bash
-   cd backend
-   uv sync --dev
-   cp env.example .env
-   # Edit .env with your Roku IP and LLM API key
-   ```
+    # Build frontend + run all backend quality checks and tests
+    ./scripts/build
 
-3. **Run Backend**:
-   ```bash
-   uv run uvicorn main:app --reload
-   ```
+    # Docker
+    docker compose up --build
 
-4. **Test**:
-   ```bash
-   uv run pytest
-   ```
+## Configuration
 
-### Environment Variables
+### Backend
 
-Create a `.env` file in the `backend/` directory with:
+Copy `config.yml.example` to `config.yml` and fill in:
+- `llm.api_key` — your Anthropic or OpenAI API key
+- `roku.ip` — your Roku device's IP address
+- `brave.api_key` — Brave Search API key (for content search)
 
-#### **Required:**
-- `ROKU_IP`: Your Roku device's IP address
-- `LLM_API_KEY`: Your LLM provider API key
+Settings can be overridden with env vars using `__` nesting (e.g. `LLM__PROVIDER=openai`).
+See the example file for all available options.
 
-#### **Optional (with defaults):**
-- `DEBUG`: Set to `true` for development (default: `false`)
-- `HOST`: Server host (default: `0.0.0.0`)
-- `PORT`: Server port (default: `8000`)
-- `LLM_PROVIDER`: LLM provider (default: `openai`)
-- `LLM_MODEL`: LLM model (default: `gpt-4`)
-- `LOG_LEVEL`: Logging level (default: `INFO`)
+### Frontend
 
-#### **Environment Configuration:**
-- `ENVIRONMENT`: Set to `production` for production (default: `development`)
-- `HOSTNAME`: Your domain/hostname (default: `localhost`)
+For development, set the backend URL in `frontend/.env.development`:
 
-**Development mode** (default):
-- Origins: `http://localhost:3000`, `http://localhost:3001`, `http://localhost:8000`
-- Credentials: `true`
-- Methods: `GET`, `POST`, `PUT`, `DELETE`, `OPTIONS`
-- Headers: `*` (all)
-- Cache: `0` (no caching)
+    VITE_API_URL=http://localhost:8483
+    VITE_WS_URL=ws://localhost:8483
 
-**Production mode**:
-- Origins: `https://yourdomain.com`
-- Credentials: `false`
-- Methods: `GET`, `POST`, `PUT`, `DELETE`
-- Headers: `Content-Type`, `Authorization`, `Accept`
-- Cache: `86400` (24 hours)
+In production (Docker), the frontend is served by the backend on the same origin, so these are not needed.
 
-## 📁 **Project Structure**
+## Architecture
 
-```
-cueso/
-├── backend/                 # FastAPI backend (Phase 1)
-│   ├── app/
-│   │   ├── core/           # Configuration and storage
-│   │   └── ...
-│   ├── tests/              # Test suite
-│   ├── pyproject.toml      # Python dependencies
-│   └── README.md           # Backend documentation
-├── project.md              # Project requirements
-└── technical-architecture.md  # Technical design
-```
+The system uses a WebSocket-first streaming architecture:
 
-## 🎯 **Why Progressive Development?**
+    User Input (CLI/Web) → WebSocket /ws/chat → LLMSession → LLM Provider → Tool Executor → Roku
 
-- **Easier to review** - Small, focused changes
-- **Faster feedback** - Test each component individually
-- **Better architecture** - Learn from each phase
-- **Reduced complexity** - Build on working foundation
+- **Backend** (`backend/`): FastAPI with async tool-calling loop, Roku ECP integration, Brave Search
+- **Frontend** (`frontend/`): React PWA with streaming chat UI, voice input, content cards
+- **CLI** (`cli/`): Click-based terminal client connecting via WebSocket
 
-## 🔧 **Development Commands**
+See `docs/` for detailed design documents.
 
-```bash
-# Backend
-cd backend
-uv sync --dev              # Install dependencies
-uv run uvicorn main:app --reload  # Run server
+## Docker
 
-# Testing & Quality
-uv run pytest              # Run tests
-uv run pytest --cov=app   # Run tests with coverage
-uv run ruff check .        # Lint code
-uv run ruff format .       # Format code
-uv run pyright .           # Type checking
+    docker compose up --build       # start
+    docker compose down             # stop
+    docker compose up --build -d    # start detached
 
-# Quality checks
-uv run ruff check . && uv run pyright .  # Lint + type check
-uv run pytest --cov=app --cov-report=html  # Tests with HTML coverage
-
-# Add new dependencies
-uv add package_name        # Production dependency
-uv add --dev package_name  # Development dependency
-```
-
-## 📚 **Documentation**
-
-- [Project Requirements](project.md) - What we're building
-- [Technical Architecture](technical-architecture.md) - How we're building it
-- [Backend README](backend/README.md) - Backend-specific setup
-
-## 🤝 **Contributing**
-
-1. Focus on one phase at a time
-2. Keep changes small and focused
-3. Ensure tests pass before moving to next phase
-4. Document decisions and trade-offs
-
----
-
-**Current Focus**: Get the basic backend working and testable. Then we'll add Roku communication, LLM integration, and tool calling step by step.
+Backend serves both API and frontend on :8484.
+All configuration (including API keys) lives in `config.yml`.

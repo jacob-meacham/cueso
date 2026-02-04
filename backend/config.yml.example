@@ -1,0 +1,48 @@
+# Cueso Configuration
+# Copy this file to config.yml and fill in your values.
+# Override the config path with CUESO_CONFIG=/path/to/config.yml
+# Env vars override YAML using double-underscore nesting: LLM__PROVIDER=openai
+
+app:
+  name: "Cueso Backend"
+  version: "0.1.0"
+  environment: development    # development | production
+  debug: true
+  hostname: localhost
+
+logging:
+  level: info                 # debug | info | warning | error | critical
+
+server:
+  host: "0.0.0.0"
+  port: 8484
+
+llm:
+  provider: anthropic         # anthropic | openai
+  api_key: your_api_key_here
+  model: claude-3-5-sonnet-20241022
+
+tools:
+  executor: roku_ecp          # roku_ecp | mcp
+
+roku:
+  ip: "192.168.1.100"
+
+mcp:
+  server_url: ""
+  server_token: ""
+
+brave:
+  api_key: your_brave_api_key_here
+
+# Streaming service search order.
+# Services are tried in the order listed — first match wins.
+# Remove a service to disable it entirely.
+# Valid names: netflix, hulu, disney_plus, max, apple_tv_plus, amazon_prime
+streaming:
+  - netflix
+  - hulu
+  - disney_plus
+  - max
+  - apple_tv_plus
+  - amazon_prime

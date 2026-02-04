@@ -1,26 +1,47 @@
+import logging
+from pathlib import Path
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 
+from app.api.chat import router as chat_router
 from app.core.config import settings
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
 app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    description="Voice/text-controlled Roku system using LLMs"
+    title=settings.app_name, version=settings.app_version, description="Voice/text-controlled Roku system using LLMs"
 )
 
-cors_origins = [f"{settings.hostname}"]
+app.include_router(chat_router)
+
+# Configure application logging early
+_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+logging.basicConfig(level=_level, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+logger = logging.getLogger("cueso")
+logger.info(
+    "Starting %s v%s (env=%s, host=%s, port=%s)",
+    settings.app_name,
+    settings.app_version,
+    settings.environment,
+    settings.host,
+    settings.port,
+)
 
 # Configure CORS based on environment
 if settings.environment == "production":
+    cors_origins: list[str] = []
     cors_allow_credentials = False
     cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
     cors_allow_headers = ["Content-Type", "Authorization", "Accept"]
     cors_max_age = 86400  # 24 hours
 else:
-    cors_allow_credentials = True
-    cors_allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    cors_origins = ["*"]
+    cors_allow_credentials = False
+    cors_allow_methods = ["*"]
     cors_allow_headers = ["*"]
     cors_max_age = 0  # No caching in development
 
@@ -33,10 +54,32 @@ app.add_middleware(
     max_age=cors_max_age,
 )
 
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# Serve frontend static files when the built frontend exists (production).
+# In dev mode (no static/ directory), the app runs in API-only mode.
+if STATIC_DIR.is_dir():
+    logger.info("Serving frontend from %s", STATIC_DIR)
+
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str) -> Response:
+        """Serve static files or fall back to index.html for SPA routing."""
+        file_path = STATIC_DIR / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+else:
+    logger.info("No frontend at %s — API-only mode", STATIC_DIR)
 
 
 if __name__ == "__main__":
@@ -45,5 +88,6 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=settings.debug,
-        log_level=settings.log_level.lower()
+        reload_dirs=["app"],
+        log_level=settings.log_level.lower(),
     )
