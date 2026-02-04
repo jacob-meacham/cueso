@@ -1,16 +1,12 @@
 """Tests for the Brave Search API client."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from app.core.brave_search import BraveSearchClient, BraveSearchError, SearchResult
-
-
-@pytest.fixture
-def mock_http_client() -> AsyncMock:
-    return AsyncMock(spec=httpx.AsyncClient)
+from tests.helpers import make_mock_response
 
 
 @pytest.fixture
@@ -18,30 +14,10 @@ def brave_client(mock_http_client: AsyncMock) -> BraveSearchClient:
     return BraveSearchClient(api_key="test-key", http_client=mock_http_client)
 
 
-def _make_response(
-    status_code: int = 200,
-    json_data: dict[str, object] | None = None,
-) -> MagicMock:
-    """Create a mock httpx.Response."""
-    response = MagicMock(spec=httpx.Response)
-    response.status_code = status_code
-    response.json.return_value = json_data or {}
-    response.text = ""
-    if status_code >= 400:
-        response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            message=f"HTTP {status_code}",
-            request=MagicMock(),
-            response=response,
-        )
-    else:
-        response.raise_for_status.return_value = None
-    return response
-
-
 class TestBraveSearchSuccess:
     @pytest.mark.asyncio
     async def test_returns_search_results(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(
+        mock_http_client.get.return_value = make_mock_response(
             json_data={
                 "web": {
                     "results": [
@@ -70,7 +46,7 @@ class TestBraveSearchSuccess:
 
     @pytest.mark.asyncio
     async def test_sends_correct_params(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(json_data={"web": {"results": []}})
+        mock_http_client.get.return_value = make_mock_response(json_data={"web": {"results": []}})
 
         await brave_client.search("my query", count=5)
 
@@ -82,7 +58,7 @@ class TestBraveSearchSuccess:
 
     @pytest.mark.asyncio
     async def test_freshness_param(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(json_data={"web": {"results": []}})
+        mock_http_client.get.return_value = make_mock_response(json_data={"web": {"results": []}})
 
         await brave_client.search("query", freshness="pw")
 
@@ -91,7 +67,7 @@ class TestBraveSearchSuccess:
 
     @pytest.mark.asyncio
     async def test_count_capped_at_20(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(json_data={"web": {"results": []}})
+        mock_http_client.get.return_value = make_mock_response(json_data={"web": {"results": []}})
 
         await brave_client.search("query", count=50)
 
@@ -102,14 +78,14 @@ class TestBraveSearchSuccess:
 class TestBraveSearchEmpty:
     @pytest.mark.asyncio
     async def test_empty_results(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(json_data={"web": {"results": []}})
+        mock_http_client.get.return_value = make_mock_response(json_data={"web": {"results": []}})
 
         results = await brave_client.search("obscure query")
         assert results == []
 
     @pytest.mark.asyncio
     async def test_missing_web_key(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(json_data={})
+        mock_http_client.get.return_value = make_mock_response(json_data={})
 
         results = await brave_client.search("query")
         assert results == []
@@ -118,14 +94,14 @@ class TestBraveSearchEmpty:
 class TestBraveSearchErrors:
     @pytest.mark.asyncio
     async def test_http_401_error(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(status_code=401)
+        mock_http_client.get.return_value = make_mock_response(status_code=401)
 
         with pytest.raises(BraveSearchError, match="401"):
             await brave_client.search("query")
 
     @pytest.mark.asyncio
     async def test_http_500_error(self, brave_client: BraveSearchClient, mock_http_client: AsyncMock) -> None:
-        mock_http_client.get.return_value = _make_response(status_code=500)
+        mock_http_client.get.return_value = make_mock_response(status_code=500)
 
         with pytest.raises(BraveSearchError, match="500"):
             await brave_client.search("query")

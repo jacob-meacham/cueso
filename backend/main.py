@@ -1,6 +1,9 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,30 +12,44 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.chat import router as chat_router
 from app.core.config import settings
+from app.core.llm import InMemorySessionStore
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Manage application-wide resources."""
+    app.state.http_client = httpx.AsyncClient()
+    app.state.session_store = InMemorySessionStore(max_sessions=100, ttl_seconds=3600)
+    yield
+    await app.state.http_client.aclose()
+
+
 app = FastAPI(
-    title=settings.app_name, version=settings.app_version, description="Voice/text-controlled Roku system using LLMs"
+    title=settings.app.name,
+    version=settings.app.version,
+    description="Voice/text-controlled Roku system using LLMs",
+    lifespan=lifespan,
 )
 
 app.include_router(chat_router)
 
 # Configure application logging early
-_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+_level = getattr(logging, settings.logging.level.upper(), logging.INFO)
 logging.basicConfig(level=_level, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 logger = logging.getLogger("cueso")
 logger.info(
     "Starting %s v%s (env=%s, host=%s, port=%s)",
-    settings.app_name,
-    settings.app_version,
-    settings.environment,
-    settings.host,
-    settings.port,
+    settings.app.name,
+    settings.app.version,
+    settings.app.environment,
+    settings.server.host,
+    settings.server.port,
 )
 
 # Configure CORS based on environment
-if settings.environment == "production":
+if settings.app.environment == "production":
     cors_origins: list[str] = []
     cors_allow_credentials = False
     cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
@@ -85,9 +102,9 @@ else:
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug,
+        host=settings.server.host,
+        port=settings.server.port,
+        reload=settings.app.debug,
         reload_dirs=["app"],
-        log_level=settings.log_level.lower(),
+        log_level=settings.logging.level.lower(),
     )

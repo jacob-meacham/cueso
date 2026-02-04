@@ -66,12 +66,12 @@ async def test_roku_ecp_tool_executor() -> None:
 
     executor = RokuECPToolExecutor("192.168.1.100", mock_http_client)
 
-    # Test search_roku tool
+    # Test search_roku tool — not yet implemented, returns error via outer handler
     tool_call = _tc("search_roku", {"query": "action movies", "channel": "Netflix"})
     result = await executor.execute_tool(tool_call)
 
-    assert "Found 5 results for 'action movies'" in result
-    assert "Netflix" in result
+    assert "Error executing tool search_roku" in result
+    assert "not yet implemented" in result
 
     # Test get_roku_status tool
     tool_call = _tc("get_roku_status")
@@ -103,19 +103,19 @@ async def test_roku_ecp_tool_executor_error() -> None:
 
     executor = RokuECPToolExecutor("192.168.1.100", mock_http_client)
 
-    # Test error handling - get_roku_status has its own fallback
+    # get_roku_status now propagates errors to outer handler
     tool_call = _tc("get_roku_status")
     result = await executor.execute_tool(tool_call)
 
-    # The method has a fallback, so it returns the default message
-    assert "Roku device is online and ready" in result
+    assert "Error executing tool get_roku_status" in result
+    assert "HTTP error" in result
 
-    # Test with a tool that doesn't have a fallback
+    # search_roku raises NotImplementedError, caught by outer handler
     tool_call = _tc("search_roku", {"query": "test"})
     result = await executor.execute_tool(tool_call)
 
-    # This should work normally since search_roku doesn't make HTTP calls
-    assert "Found 5 results for 'test'" in result
+    assert "Error executing tool search_roku" in result
+    assert "not yet implemented" in result
 
 
 @pytest.mark.asyncio
@@ -133,7 +133,7 @@ async def test_roku_ecp_tool_executor_http_error() -> None:
     tool_call = _tc("get_roku_status")
     result = await executor.execute_tool(tool_call)
 
-    assert "Roku device is online but status unavailable" in result
+    assert "Roku device returned status 500" in result
 
 
 def test_roku_ecp_tool_executor_base_url() -> None:

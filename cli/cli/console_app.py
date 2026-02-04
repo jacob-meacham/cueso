@@ -30,22 +30,21 @@ class ConsoleApp:
 
         # Create prompt session with auto-completion
         # Completion menu styling: transparent background, light-blue highlight
-        self.prompt_style = Style.from_dict({
-            'prompt': 'ansicyan bold',
-
-            # Completion menu base
-            "completion-menu": "bg:default",
-            "completion-menu.completion": "bg:default fg:#bbbbbb",
-            "completion-menu.completion.current": "bg:#5fafff fg:#202020 bold",
-
-            # Help/meta text styling
-            "completion-menu.meta": "bg:#202020 fg:#bbbbbb",
-            "completion-menu.meta.completion": "bg:#202020 fg:#bbbbbb",
-            "completion-menu.meta.completion.current": "bg:#202020 #5fafff",  # light blue when selected
-
-            # Selected text generally
-            "selected": "bg:default",
-        })
+        self.prompt_style = Style.from_dict(
+            {
+                "prompt": "ansicyan bold",
+                # Completion menu base
+                "completion-menu": "bg:default",
+                "completion-menu.completion": "bg:default fg:#bbbbbb",
+                "completion-menu.completion.current": "bg:#5fafff fg:#202020 bold",
+                # Help/meta text styling
+                "completion-menu.meta": "bg:#202020 fg:#bbbbbb",
+                "completion-menu.meta.completion": "bg:#202020 fg:#bbbbbb",
+                "completion-menu.meta.completion.current": "bg:#202020 #5fafff",  # light blue when selected
+                # Selected text generally
+                "selected": "bg:default",
+            }
+        )
 
         self.prompt_session = PromptSession(
             completer=self.completer,
@@ -70,11 +69,7 @@ class ConsoleApp:
         banner.append("Cueso CLI", style="bold white")
         banner.append(" - Voice/Text Controlled Roku System", style="dim")
 
-        panel = Panel(
-            banner,
-            border_style="blue",
-            padding=(1, 2)
-        )
+        panel = Panel(banner, border_style="blue", padding=(1, 2))
         self.console.print(panel)
 
         # Print help with auto-completion info
@@ -175,7 +170,9 @@ class ConsoleApp:
                             elif value.lower() in ["false", "0", "no"]:
                                 value = False
                             else:
-                                print_formatted_text(HTML("<ansired>Error: show_timestamps must be true/false</ansired>"))
+                                print_formatted_text(
+                                    HTML("<ansired>Error: show_timestamps must be true/false</ansired>")
+                                )
                                 return True
 
                         # Update the injected config and persist
@@ -183,7 +180,11 @@ class ConsoleApp:
                         print_formatted_text(HTML(f"<ansigreen>Set {key} = {value}</ansigreen>"))
                     else:
                         print_formatted_text(HTML(f"<ansired>Unknown config key: {key}</ansired>"))
-                        print_formatted_text(HTML("<ansiyellow>Available keys: backend_url, websocket_url, show_timestamps, default_session_name</ansiyellow>"))
+                        print_formatted_text(
+                            HTML(
+                                "<ansiyellow>Available keys: backend_url, websocket_url, show_timestamps, default_session_name</ansiyellow>"
+                            )
+                        )
                 else:
                     print_formatted_text(HTML("<ansired>Usage: config &lt;key&gt; &lt;value&gt;</ansired>"))
             else:
@@ -213,10 +214,7 @@ class ConsoleApp:
             await self.chat_client.connect(session_id)
 
         # Send the message to the backend
-        await self.chat_client.send_message(
-            message,
-            self.session_manager.get_current_session_id()
-        )
+        await self.chat_client.send_message(message, self.session_manager.get_current_session_id())
 
     async def run(self):
         """Run the main application."""
@@ -247,8 +245,7 @@ class ConsoleApp:
                             continue
 
                         # Check if it's a command (starts with slash or is a known command)
-                        if (user_input.startswith("/") or
-                            user_input.split()[0].lower() in self.completer.get_commands()):
+                        if user_input.startswith("/") or user_input.split()[0].lower() in self.completer.get_commands():
                             should_continue = await self._handle_command(user_input)
                             if not should_continue:
                                 break

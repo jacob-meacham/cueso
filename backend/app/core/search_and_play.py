@@ -181,11 +181,12 @@ async def launch_on_roku(
     Returns:
         LaunchResult with success status.
     """
-    launch_url = f"{roku_base_url}/launch/{channel_id}?contentId={content_id}&mediaType={media_type}"
-    logger.info("Launching Roku: POST %s", launch_url)
+    launch_url = f"{roku_base_url}/launch/{channel_id}"
+    params = {"contentId": content_id, "mediaType": media_type}
+    logger.info("Launching Roku: POST %s params=%s", launch_url, params)
 
     try:
-        response = await http_client.post(launch_url, timeout=10.0)
+        response = await http_client.post(launch_url, params=params, timeout=10.0)
     except httpx.RequestError as e:
         return LaunchResult(success=False, message=f"Roku connection failed: {e}")
 

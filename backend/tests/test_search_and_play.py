@@ -5,20 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from app.core.brave_search import BraveSearchClient, BraveSearchError, SearchResult
+from app.core.brave_search import BraveSearchError, SearchResult
 from app.core.search_and_play import build_search_query, launch_on_roku, search_content
 from app.core.streaming import HULU, NETFLIX
-
-
-@pytest.fixture
-def mock_brave_client() -> AsyncMock:
-    return AsyncMock(spec=BraveSearchClient)
-
-
-@pytest.fixture
-def mock_http_client() -> AsyncMock:
-    return AsyncMock(spec=httpx.AsyncClient)
-
 
 ROKU_BASE_URL = "http://192.168.1.100:8060"
 
@@ -212,9 +201,10 @@ class TestLaunchOnRoku:
         assert result.success is True
         assert result.status_code == 200
         mock_http_client.post.assert_called_once()
-        call_url = mock_http_client.post.call_args.args[0]
-        assert "/launch/12" in call_url
-        assert "contentId=81231974" in call_url
+        call_args = mock_http_client.post.call_args
+        assert "/launch/12" in call_args.args[0]
+        assert call_args.kwargs["params"]["contentId"] == "81231974"
+        assert call_args.kwargs["params"]["mediaType"] == "movie"
 
     @pytest.mark.asyncio
     async def test_launch_failure_status(self, mock_http_client: AsyncMock) -> None:
@@ -260,5 +250,5 @@ class TestLaunchOnRoku:
             media_type="episode",
         )
 
-        call_url = mock_http_client.post.call_args.args[0]
-        assert "mediaType=episode" in call_url
+        call_args = mock_http_client.post.call_args
+        assert call_args.kwargs["params"]["mediaType"] == "episode"

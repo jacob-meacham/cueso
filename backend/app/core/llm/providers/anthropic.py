@@ -1,12 +1,13 @@
 """Anthropic LLM provider implementation."""
 
+import json
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import anthropic
 
 from ..provider import LLMProvider
-from ..types import Message, MessageRole, SessionConfig, Tool, ToolCall
+from ..types import Message, MessageRole, SessionConfig, StreamResult, Tool, ToolCall
 
 
 class AnthropicProvider(LLMProvider):
@@ -17,12 +18,16 @@ class AnthropicProvider(LLMProvider):
         self.model = model
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
-        """Convert our Message format to Anthropic's format."""
+        """Convert our Message format to Anthropic's format.
+
+        Anthropic handles system messages separately (via the `system` param),
+        so they are skipped here. Tool results must be sent as user messages
+        with type=tool_result blocks.
+        """
         converted: list[dict[str, Any]] = []
 
         for msg in messages:
             if msg.role == MessageRole.SYSTEM:
-                # System messages are handled separately in Anthropic
                 continue
             elif msg.role == MessageRole.USER:
                 content: list[dict[str, Any]] = []
@@ -31,7 +36,6 @@ class AnthropicProvider(LLMProvider):
                 else:
                     content.extend(msg.content)
 
-                # Add tool results if present
                 if msg.tool_results:
                     for tool_result in msg.tool_results:
                         content.append(
@@ -50,7 +54,6 @@ class AnthropicProvider(LLMProvider):
                 elif not isinstance(msg.content, str):
                     content.extend(msg.content)
 
-                # Add tool calls if present
                 if msg.tool_calls:
                     for tool_call in msg.tool_calls:
                         content.append(
@@ -86,6 +89,13 @@ class AnthropicProvider(LLMProvider):
             {"name": tool.name, "description": tool.description, "input_schema": tool.input_schema} for tool in tools
         ]
 
+    def _extract_system_prompt(self, messages: list[Message]) -> str:
+        """Extract the system prompt from messages."""
+        for msg in messages:
+            if msg.role == MessageRole.SYSTEM:
+                return msg.content if isinstance(msg.content, str) else ""
+        return ""
+
     def _parse_response(self, response: Any) -> tuple[str, list[ToolCall]]:
         """Parse Anthropic response into our format."""
         content = ""
@@ -105,24 +115,16 @@ class AnthropicProvider(LLMProvider):
         config: SessionConfig,
     ) -> tuple[str, list[ToolCall]]:
         """Generate a non-streaming response from Anthropic."""
-        # Extract system prompt
-        system_prompt = ""
-        for msg in messages:
-            if msg.role == MessageRole.SYSTEM:
-                system_prompt = msg.content if isinstance(msg.content, str) else ""
-                break
-
-        # Convert messages and tools
+        system_prompt = self._extract_system_prompt(messages)
         converted_messages = self._convert_messages(messages)
         converted_tools = self._convert_tools(config.tools) if config.tools else None
 
-        # Make API call
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=config.max_tokens,
             system=system_prompt,
-            messages=cast(Any, converted_messages),
-            tools=cast(Any, converted_tools),
+            messages=converted_messages,  # type: ignore[arg-type]
+            tools=converted_tools,  # type: ignore[arg-type]
             temperature=config.temperature,
         )
 
@@ -132,45 +134,44 @@ class AnthropicProvider(LLMProvider):
         self,
         messages: list[Message],
         config: SessionConfig,
+        result: StreamResult,
     ) -> AsyncGenerator[dict[str, Any]]:
-        """Generate a streaming response from Anthropic."""
-        # Extract system prompt
-        system_prompt = ""
-        for msg in messages:
-            if msg.role == MessageRole.SYSTEM:
-                system_prompt = msg.content if isinstance(msg.content, str) else ""
-                break
+        """Generate a streaming response from Anthropic.
 
-        # Convert messages and tools
+        Yields event dicts for the client. Populates `result` with the
+        accumulated content and tool_calls by the time the generator is done.
+        """
+        system_prompt = self._extract_system_prompt(messages)
         converted_messages = self._convert_messages(messages)
         converted_tools = self._convert_tools(config.tools) if config.tools else None
 
-        # Make streaming API call
-        stream = await self.client.messages.create(
-            model=self.model,
-            max_tokens=config.max_tokens,
-            system=system_prompt,
-            messages=cast(Any, converted_messages),
-            tools=cast(Any, converted_tools),
-            temperature=config.temperature,
-            stream=True,
+        stream = cast(
+            Any,
+            await self.client.messages.create(
+                model=self.model,
+                max_tokens=config.max_tokens,
+                system=system_prompt,
+                messages=converted_messages,  # type: ignore[arg-type]
+                tools=converted_tools,  # type: ignore[arg-type]
+                temperature=config.temperature,
+                stream=True,
+            ),
         )
 
         current_content = ""
         current_tool_calls: list[ToolCall] = []
-        # Track the tool block currently being streamed (id + name come from
-        # content_block_start; partial JSON comes from content_block_delta).
+        # Track partial JSON for the active tool's input arguments.
         _active_tool_id: str = ""
         _active_tool_name: str = ""
+        _active_tool_json: str = ""
 
         async for chunk in stream:
             if chunk.type == "content_block_start":
-                # A new content block is starting.  For tool_use blocks this is
-                # where the tool id and name are provided.
                 block = chunk.content_block
                 if block.type == "tool_use":
                     _active_tool_id = block.id
                     _active_tool_name = block.name
+                    _active_tool_json = ""
                     current_tool_calls.append(ToolCall(id=block.id, name=block.name, arguments={}))
                     yield {
                         "type": "tool_call_delta",
@@ -183,7 +184,8 @@ class AnthropicProvider(LLMProvider):
                     yield {"type": "content_delta", "content": chunk.delta.text, "role": "assistant"}
 
                 elif chunk.delta.type == "input_json_delta":
-                    # Partial JSON for the active tool's input — emit for UI
+                    # Accumulate partial JSON so we can parse the full arguments later
+                    _active_tool_json += chunk.delta.partial_json
                     yield {
                         "type": "tool_call_delta",
                         "tool_call": {
@@ -193,11 +195,23 @@ class AnthropicProvider(LLMProvider):
                         },
                     }
 
+            elif chunk.type == "content_block_stop":
+                # Finalize tool call arguments from accumulated JSON
+                if _active_tool_json and current_tool_calls:
+                    try:
+                        current_tool_calls[-1].arguments = json.loads(_active_tool_json)
+                    except json.JSONDecodeError:
+                        current_tool_calls[-1].arguments = {"_raw": _active_tool_json}
+                    _active_tool_json = ""
+
             elif chunk.type == "message_delta":
-                # Message is complete
                 yield {
                     "type": "message_complete",
                     "content": current_content,
                     "tool_calls": [tc.name for tc in current_tool_calls],
                     "finish_reason": chunk.delta.stop_reason or "unknown",
                 }
+
+        # Populate the result container for the session to consume
+        result.content = current_content
+        result.tool_calls = current_tool_calls

@@ -41,7 +41,7 @@ class CuesoCompleter(Completer):
         text = document.text_before_cursor
 
         # Only offer completions if the line begins with '/'
-        if not text.lstrip().startswith('/'):
+        if not text.lstrip().startswith("/"):
             return
 
         word = document.get_word_before_cursor()
@@ -51,7 +51,7 @@ class CuesoCompleter(Completer):
                 desc = self.descriptions.get(cmd, "")
                 yield Completion(
                     insertion,
-                    start_position=-len(word)-1,
+                    start_position=-len(word) - 1,
                     display=cmd,
                     display_meta=desc,
                 )

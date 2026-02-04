@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from .types import Message, SessionConfig, ToolCall
+from .types import Message, SessionConfig, StreamResult, ToolCall
 
 
 class LLMProvider(ABC):
@@ -24,6 +24,12 @@ class LLMProvider(ABC):
         self,
         messages: list[Message],
         config: SessionConfig,
+        result: StreamResult,
     ) -> AsyncGenerator[dict[str, Any]]:
-        """Generate a streaming response from the LLM."""
+        """Generate a streaming response from the LLM.
+
+        Yields event dicts for the client and populates `result` with
+        the accumulated content and tool_calls by the time the generator
+        is exhausted.
+        """
         yield {}  # pragma: no cover

@@ -20,7 +20,6 @@ class ChatClient:
         self.is_connected = False
         self._logger = logging.getLogger("cueso.cli.chat")
 
-
     async def connect(self, session_id: str | None = None) -> bool:
         """Connect to the WebSocket endpoint.
 
@@ -47,10 +46,7 @@ class ChatClient:
         """Send a message to the backend."""
         if not self.websocket or not self.is_connected:
             raise ConnectionError("Not connected to backend")
-        payload = {
-            "message": message,
-            "session_id": session_id
-        }
+        payload = {"message": message, "session_id": session_id}
 
         await self.websocket.send(json.dumps(payload))
         self._logger.debug("Sent to WS: %s", payload)
@@ -86,116 +82,112 @@ class ChatClient:
             assistant_streaming = False
             tools_announced: set[str] = set()
             while True:
-                    try:
-                        # Receive message from backend
-                        message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
-                        data = json.loads(message)
-                        self._logger.debug("WS event: %s", data)
+                try:
+                    # Receive message from backend
+                    message = await asyncio.wait_for(self.websocket.recv(), timeout=1.0)
+                    data = json.loads(message)
+                    self._logger.debug("WS event: %s", data)
 
-                        event_type = data.get("type")
+                    event_type = data.get("type")
 
-                        if event_type == "session_created":
-                            session_id = data.get("session_id")
-                            print_formatted_text(HTML(f"<ansigray>Session ID: {session_id}</ansigray>"))
+                    if event_type == "session_created":
+                        session_id = data.get("session_id")
+                        print_formatted_text(HTML(f"<ansigray>Session ID: {session_id}</ansigray>"))
 
-                        elif event_type == "thinking":
-                            thinking = data.get("content", "")
-                            print_formatted_text(HTML(f"<ansigray>{thinking}</ansigray>"))
+                    elif event_type == "thinking":
+                        thinking = data.get("content", "")
+                        print_formatted_text(HTML(f"<ansigray>{thinking}</ansigray>"))
 
-                        elif event_type == "tool_call":
-                            tool_name = data.get("tool_name", "")
-                            tool_args = data.get("tool_arguments", {})
-                            print_formatted_text(HTML(f"<ansiyellow>🔧 Using tool: {tool_name}</ansiyellow>"))
-                            if tool_args:
-                                pretty = json.dumps(tool_args, indent=2)
-                                print_formatted_text(HTML(f"<ansigray>Arguments:</ansigray> {pretty}"))
+                    elif event_type == "tool_call":
+                        tool_name = data.get("tool_name", "")
+                        tool_args = data.get("tool_arguments", {})
+                        print_formatted_text(HTML(f"<ansiyellow>🔧 Using tool: {tool_name}</ansiyellow>"))
+                        if tool_args:
+                            pretty = json.dumps(tool_args, indent=2)
+                            print_formatted_text(HTML(f"<ansigray>Arguments:</ansigray> {pretty}"))
 
-                        elif event_type == "tool_result":
-                            result = data.get("result", "")
-                            print_formatted_text(HTML(f"<ansigreen>✅ Tool result: {result}</ansigreen>"))
+                    elif event_type == "tool_result":
+                        result = data.get("result", "")
+                        print_formatted_text(HTML(f"<ansigreen>✅ Tool result: {result}</ansigreen>"))
 
-                        elif event_type == "content":
-                            content = data.get("content", "")
+                    elif event_type == "content":
+                        content = data.get("content", "")
+                        if not assistant_label_printed:
+                            print_formatted_text(HTML("<ansimagenta><b>cueso</b></ansimagenta>"))
+                            assistant_label_printed = True
+                        print_formatted_text(content)
+
+                    # New streaming events from backend
+                    elif event_type == "content_delta":
+                        delta = data.get("content", "")
+                        content_buffer += delta
+                        if not assistant_label_printed:
+                            print_formatted_text(HTML("<ansimagenta><b>cueso</b></ansimagenta>"))
+                            assistant_label_printed = True
+                        assistant_streaming = True
+                        # Print incrementally without newline
+                        print_formatted_text(delta, end="", flush=True)
+                    elif event_type == "message_complete":
+                        # Prefer server-provided content when present
+                        final_content = data.get("content") or content_buffer
+                        if assistant_streaming:
+                            # finish the streaming line
+                            print_formatted_text("")
+                            assistant_streaming = False
+                            printed_final = True
+                        elif final_content:
                             if not assistant_label_printed:
                                 print_formatted_text(HTML("<ansimagenta><b>cueso</b></ansimagenta>"))
                                 assistant_label_printed = True
-                            print_formatted_text(content)
+                            print_formatted_text(final_content)
+                            printed_final = True
+                        content_buffer = ""
+                        tools_announced.clear()
+                    elif event_type == "tool_call_delta":
+                        tc = data.get("tool_call", {})
+                        name = tc.get("name", "")
+                        if name and name not in tools_announced:
+                            tools_announced.add(name)
+                            print_formatted_text(HTML(f"<ansiyellow>🔧 Using tool: {name}</ansiyellow>"))
 
-                        # New streaming events from backend
-                        elif event_type == "content_delta":
-                            delta = data.get("content", "")
-                            content_buffer += delta
+                    elif event_type == "tool_result":
+                        tool_name = data.get("tool_name", "")
+                        result_text = data.get("result", "")
+                        is_error = data.get("error", False)
+                        if is_error:
+                            print_formatted_text(HTML(f"<ansired>  ✗ {tool_name}: {result_text}</ansired>"))
+                        elif tool_name == "find_content":
+                            self._render_find_content(result_text)
+                        else:
+                            print_formatted_text(HTML(f"<ansigreen>  ✓ {tool_name}</ansigreen>"))
+                            self._logger.debug("Tool result for %s: %s", tool_name, result_text[:200])
+
+                    elif event_type == "final":
+                        # Final response, break out of streaming
+                        if assistant_streaming:
+                            print_formatted_text("")
+                            assistant_streaming = False
+                        if not printed_final and content_buffer:
                             if not assistant_label_printed:
                                 print_formatted_text(HTML("<ansimagenta><b>cueso</b></ansimagenta>"))
                                 assistant_label_printed = True
-                            assistant_streaming = True
-                            # Print incrementally without newline
-                            print_formatted_text(delta, end="", flush=True)
-                        elif event_type == "message_complete":
-                            # Prefer server-provided content when present
-                            final_content = data.get("content") or content_buffer
-                            if assistant_streaming:
-                                # finish the streaming line
-                                print_formatted_text("")
-                                assistant_streaming = False
-                                printed_final = True
-                            elif final_content:
-                                if not assistant_label_printed:
-                                    print_formatted_text(HTML("<ansimagenta><b>cueso</b></ansimagenta>"))
-                                    assistant_label_printed = True
-                                print_formatted_text(final_content)
-                                printed_final = True
+                            print_formatted_text(content_buffer)
                             content_buffer = ""
-                            tools_announced.clear()
-                        elif event_type == "tool_call_delta":
-                            tc = data.get("tool_call", {})
-                            name = tc.get("name", "")
-                            if name and name not in tools_announced:
-                                tools_announced.add(name)
-                                print_formatted_text(HTML(f"<ansiyellow>🔧 Using tool: {name}</ansiyellow>"))
-
-                        elif event_type == "tool_result":
-                            tool_name = data.get("tool_name", "")
-                            result_text = data.get("result", "")
-                            is_error = data.get("error", False)
-                            if is_error:
-                                print_formatted_text(
-                                    HTML(f"<ansired>  ✗ {tool_name}: {result_text}</ansired>")
-                                )
-                            elif tool_name == "find_content":
-                                self._render_find_content(result_text)
-                            else:
-                                print_formatted_text(
-                                    HTML(f"<ansigreen>  ✓ {tool_name}</ansigreen>")
-                                )
-                                self._logger.debug("Tool result for %s: %s", tool_name, result_text[:200])
-
-                        elif event_type == "final":
-                            # Final response, break out of streaming
-                            if assistant_streaming:
-                                print_formatted_text("")
-                                assistant_streaming = False
-                            if not printed_final and content_buffer:
-                                if not assistant_label_printed:
-                                    print_formatted_text(HTML("<ansimagenta><b>cueso</b></ansimagenta>"))
-                                    assistant_label_printed = True
-                                print_formatted_text(content_buffer)
-                                content_buffer = ""
-                                printed_final = True
-                            break
-
-                        elif event_type == "error":
-                            error = data.get("message", "Unknown error")
-                            print_formatted_text(HTML(f"<ansired>❌ Error: {error}</ansired>"))
-                            break
-
-                    except TimeoutError:
-                        # No message received within timeout, continue
-                        continue
-                    except websockets.exceptions.ConnectionClosed:
-                        print_formatted_text(HTML("<ansired>Connection to backend closed.</ansired>"))
-                        self.is_connected = False
+                            printed_final = True
                         break
+
+                    elif event_type == "error":
+                        error = data.get("message", "Unknown error")
+                        print_formatted_text(HTML(f"<ansired>❌ Error: {error}</ansired>"))
+                        break
+
+                except TimeoutError:
+                    # No message received within timeout, continue
+                    continue
+                except websockets.exceptions.ConnectionClosed:
+                    print_formatted_text(HTML("<ansired>Connection to backend closed.</ansired>"))
+                    self.is_connected = False
+                    break
 
         except Exception as e:
             print_formatted_text(HTML(f"<ansired>Error streaming response: {e}</ansired>"))
@@ -213,7 +205,7 @@ class ChatClient:
         try:
             parsed = json.loads(result_text)
         except json.JSONDecodeError:
-            print_formatted_text(HTML(f"<ansigreen>  ✓ find_content</ansigreen>"))
+            print_formatted_text(HTML("<ansigreen>  ✓ find_content</ansigreen>"))
             return
 
         matches = parsed.get("matches", [])

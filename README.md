@@ -67,3 +67,29 @@ See `docs/` for detailed design documents.
 
 Backend serves both API and frontend on :8484.
 All configuration (including API keys) lives in `config.yml`.
+
+## Evaluations
+
+The CLI includes an eval system for testing end-to-end behavior against a running backend.
+
+    cd cli
+    ./evals.sh              # run all evals
+    ./evals.sh 1 3 6        # run specific evals by number
+    ./evals.sh --list       # list available evals
+
+Evals require the dev server running (`./scripts/dev` or `cd backend && uv run python main.py`).
+Each eval sends a prompt to the backend and validates the response against expected patterns.
+
+## Troubleshooting
+
+**`config.yml not found`**: Copy `config.yml.example` to `config.yml` in the repo root. The backend
+looks for this file relative to its working directory (`backend/`), so it reads `../config.yml` or
+you can set `CUESO_CONFIG=/absolute/path/to/config.yml`.
+
+**`LLM API key is required`**: Set `llm.api_key` in `config.yml` or via env var `LLM__API_KEY=sk-...`.
+
+**`Roku device returned status 500` / connection refused**: Verify your Roku is on the same network
+and `roku.ip` in config matches. The Roku ECP API listens on port 8060 by default.
+
+**Port already in use**: The backend defaults to port 8483. Change it in `config.yml` under
+`server.port` or via `SERVER__PORT=9000`.

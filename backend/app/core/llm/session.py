@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from .provider import LLMProvider
-from .types import Message, MessageRole, SessionConfig, ToolCall, ToolCallStatus, ToolResult
+from .types import Message, MessageRole, SessionConfig, StreamResult, ToolCall, ToolCallStatus, ToolResult
 
 
 class LLMSession:
@@ -44,8 +44,15 @@ class LLMSession:
         user_message: str,
         tool_executor: Callable[[ToolCall], Awaitable[str]] | None = None,
     ) -> AsyncGenerator[dict[str, Any]]:
-        """Chat with the LLM, handling tool calls if needed."""
-        # Add user message
+        """Chat with the LLM, handling tool calls if needed.
+
+        Implements the tool-calling loop: LLM → tool call → tool result → LLM.
+        Each iteration is one LLM round-trip. The loop runs until:
+        1. The LLM returns no tool calls (normal completion).
+        2. max_iterations is reached (safety limit).
+        3. A tool in pause_after is executed (hand control back to the client).
+        4. No tool_executor is provided (caller handles tool calls externally).
+        """
         self.add_message(Message(role=MessageRole.USER, content=user_message))
         self.logger.info("User message added; total_messages=%d", len(self.messages))
 
@@ -57,12 +64,13 @@ class LLMSession:
 
             # Generate response from LLM
             if self.config.stream:
-                async for chunk in self.provider.generate_stream(self.get_context(), self.config):
+                stream_result = StreamResult()
+                async for chunk in self.provider.generate_stream(self.get_context(), self.config, stream_result):
                     self.logger.debug("Stream chunk type=%s keys=%s", chunk.get("type"), list(chunk.keys()))
                     yield chunk
 
-                # Get the complete response for tool calling
-                content, tool_calls = await self.provider.generate(self.get_context(), self.config)
+                content = stream_result.content
+                tool_calls = stream_result.tool_calls
             else:
                 content, tool_calls = await self.provider.generate(self.get_context(), self.config)
 

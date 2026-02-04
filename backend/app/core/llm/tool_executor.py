@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
+
+from ..brave_search import BraveSearchError
+from ..search_and_play import launch_on_roku, search_content
+from .types import ROKU_ECP_PORT, Tool
 
 if TYPE_CHECKING:
     from ..brave_search import BraveSearchClient
@@ -36,6 +41,120 @@ class MCPToolExecutor(ToolExecutor):
             return f"Error executing tool {tool_call.name} via MCP: {e}"
 
 
+# --- Tool definitions co-located with their handler implementations ---
+
+TOOL_DEFINITIONS: list[Tool] = [
+    Tool(
+        name="search_roku",
+        description="Search for content on Roku channels",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "channel": {"type": "string", "description": "Channel to search"},
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="get_roku_status",
+        description="Get current status of Roku device",
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+    Tool(
+        name="web_search",
+        description=(
+            "Search the web using Brave Search. Use this to find information about shows, "
+            "movies, episodes, or any general knowledge. You can search IMDB, TVDB, Wikipedia, "
+            "or any other site to identify content, confirm titles, and look up season/episode "
+            "numbers. Returns titles, URLs, and descriptions."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of results to return (1-10, default 5)",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="find_content",
+        description=(
+            "Search streaming services (Netflix, Hulu, Disney+, Max, Apple TV+, Amazon Prime) "
+            "for content and return all available matches with channel IDs and content IDs. "
+            "Use this when you know the exact content to find. The results include every "
+            "streaming service where the content is available. After calling this, use "
+            "launch_on_roku to play the best match (or ask the user which service they prefer)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "The show or movie title (e.g. 'Rick and Morty')",
+                },
+                "season": {
+                    "type": "integer",
+                    "description": "Season number (for TV episodes)",
+                },
+                "episode": {
+                    "type": "integer",
+                    "description": "Episode number (for TV episodes)",
+                },
+                "episode_title": {
+                    "type": "string",
+                    "description": "Episode title for better search accuracy",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "The type of media",
+                    "enum": ["movie", "series", "episode", "season"],
+                },
+            },
+            "required": ["title"],
+        },
+    ),
+    Tool(
+        name="launch_on_roku",
+        description=(
+            "Launch content on the Roku device. Call this after find_content with one of the "
+            "returned matches. Provide the channel_id, content_id, and media_type from the "
+            "find_content results."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "integer",
+                    "description": "Roku channel ID from find_content results",
+                },
+                "content_id": {
+                    "type": "string",
+                    "description": "Content ID from find_content results",
+                },
+                "media_type": {
+                    "type": "string",
+                    "description": "Media type from find_content results",
+                    "enum": ["movie", "series", "episode", "season"],
+                },
+            },
+            "required": ["channel_id", "content_id"],
+        },
+    ),
+]
+
+
 class RokuECPToolExecutor(ToolExecutor):
     """Tool executor that directly calls Roku ECP APIs."""
 
@@ -47,55 +166,48 @@ class RokuECPToolExecutor(ToolExecutor):
     ) -> None:
         self.roku_ip = roku_ip
         self.http_client = http_client
-        self.base_url = f"http://{roku_ip}:8060"
+        self.base_url = f"http://{roku_ip}:{ROKU_ECP_PORT}"
         self.brave_client = brave_client
+        self._handlers: dict[str, Callable[..., Awaitable[str]]] = {
+            "search_roku": self._search_roku,
+            "get_roku_status": self._get_roku_status,
+            "web_search": self._web_search,
+            "find_content": self._find_content,
+            "launch_on_roku": self._launch_on_roku,
+        }
+
+    @classmethod
+    def get_tool_definitions(cls) -> list[Tool]:
+        """Return the tool definitions co-located with this executor."""
+        return TOOL_DEFINITIONS
 
     async def execute_tool(self, tool_call: ToolCall) -> str:
-        """Execute tool by calling Roku ECP directly."""
+        """Execute tool by dispatching to the registered handler."""
         try:
-            if tool_call.name == "search_roku":
-                return await self._search_roku(tool_call.arguments)
-            elif tool_call.name == "get_roku_status":
-                return await self._get_roku_status()
-            elif tool_call.name == "web_search":
-                return await self._web_search(tool_call.arguments)
-            elif tool_call.name == "find_content":
-                return await self._find_content(tool_call.arguments)
-            elif tool_call.name == "launch_on_roku":
-                return await self._launch_on_roku(tool_call.arguments)
-            else:
+            handler = self._handlers.get(tool_call.name)
+            if handler is None:
                 return f"Unknown tool: {tool_call.name}"
+            return await handler(tool_call.arguments)
         except Exception as e:
             return f"Error executing tool {tool_call.name}: {e}"
 
     async def _search_roku(self, arguments: dict[str, Any]) -> str:
         """Search for content on Roku channels."""
-        query = arguments.get("query", "")
-        channel = arguments.get("channel", "default")
+        raise NotImplementedError("search_roku is not yet implemented against the Roku ECP API")
 
-        # This would make actual ECP calls to search
-        # For now, return a mock response
-        return f"Found 5 results for '{query}' on {channel}: [Result 1, Result 2, Result 3, Result 4, Result 5]"
-
-    async def _get_roku_status(self) -> str:
+    async def _get_roku_status(self, arguments: dict[str, Any]) -> str:
         """Get current status of Roku device."""
-        try:
-            # Make actual ECP call to get device info
-            response = await self.http_client.get(f"{self.base_url}/query/device-info")
-            if response.status_code == 200:
-                device_info = response.json()
-                return f"Roku device is online. Model: {device_info.get('model', 'Unknown')}"
-            else:
-                return "Roku device is online but status unavailable"
-        except Exception:
-            return "Roku device is online and ready. Current app: Home screen"
+        response = await self.http_client.get(f"{self.base_url}/query/device-info")
+        if response.status_code == 200:
+            device_info = response.json()
+            return f"Roku device is online. Model: {device_info.get('model', 'Unknown')}"
+        else:
+            return f"Roku device returned status {response.status_code}"
 
     async def _web_search(self, arguments: dict[str, Any]) -> str:
         """General web search via Brave Search API."""
         if self.brave_client is None:
             return "Error: Brave Search is not configured. Set BRAVE_API_KEY."
-
-        from ..brave_search import BraveSearchError
 
         query = arguments.get("query", "")
         count = arguments.get("count", 5)
@@ -115,8 +227,6 @@ class RokuECPToolExecutor(ToolExecutor):
         if self.brave_client is None:
             return json.dumps({"success": False, "message": "Brave Search is not configured.", "matches": []})
 
-        from ..search_and_play import search_content
-
         result = await search_content(
             title=arguments.get("title", ""),
             brave_client=self.brave_client,
@@ -129,8 +239,6 @@ class RokuECPToolExecutor(ToolExecutor):
 
     async def _launch_on_roku(self, arguments: dict[str, Any]) -> str:
         """Launch content on Roku given channel_id and content_id."""
-        from ..search_and_play import launch_on_roku
-
         channel_id = arguments.get("channel_id")
         content_id = arguments.get("content_id")
         media_type = arguments.get("media_type", "movie")

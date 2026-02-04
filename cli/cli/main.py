@@ -11,8 +11,8 @@ from cli.console_app import ConsoleApp
 
 
 @click.command()
-@click.option('--backend-url', help='Backend server URL (overrides stored config)')
-@click.option('--websocket-url', help='WebSocket URL for chat (overrides stored config)')
+@click.option("--backend-url", help="Backend server URL (overrides stored config)")
+@click.option("--websocket-url", help="WebSocket URL for chat (overrides stored config)")
 def main(backend_url: str | None, websocket_url: str | None):
     """Cueso CLI - Voice/Text Controlled Roku System
 

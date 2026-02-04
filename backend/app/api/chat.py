@@ -4,132 +4,19 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+import httpx
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from ..core.brave_search import BraveSearchClient
 from ..core.config import settings
-from ..core.llm import InMemorySessionStore, LLMProvider, SessionConfig, Tool, ToolExecutor
+from ..core.llm import ROKU_ECP_PORT, LLMProvider, SessionConfig, SessionStore, ToolExecutor
+from ..core.llm.tool_executor import RokuECPToolExecutor
 
 logger = logging.getLogger("cueso.chat")
 
 router = APIRouter()
 
-# Global session store instance
-session_store = InMemorySessionStore()
-
-
-# --- Tool definitions ---
-
-AVAILABLE_TOOLS = [
-    Tool(
-        name="search_roku",
-        description="Search for content on Roku channels",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-                "channel": {"type": "string", "description": "Channel to search"},
-            },
-            "required": ["query"],
-        },
-    ),
-    Tool(
-        name="get_roku_status",
-        description="Get current status of Roku device",
-        input_schema={
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    ),
-    Tool(
-        name="web_search",
-        description=(
-            "Search the web using Brave Search. Use this to find information about shows, "
-            "movies, episodes, or any general knowledge. You can search IMDB, TVDB, Wikipedia, "
-            "or any other site to identify content, confirm titles, and look up season/episode "
-            "numbers. Returns titles, URLs, and descriptions."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query",
-                },
-                "count": {
-                    "type": "integer",
-                    "description": "Number of results to return (1-10, default 5)",
-                },
-            },
-            "required": ["query"],
-        },
-    ),
-    Tool(
-        name="find_content",
-        description=(
-            "Search streaming services (Netflix, Hulu, Disney+, Max, Apple TV+, Amazon Prime) "
-            "for content and return all available matches with channel IDs and content IDs. "
-            "Use this when you know the exact content to find. The results include every "
-            "streaming service where the content is available. After calling this, use "
-            "launch_on_roku to play the best match (or ask the user which service they prefer)."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "The show or movie title (e.g. 'Rick and Morty')",
-                },
-                "season": {
-                    "type": "integer",
-                    "description": "Season number (for TV episodes)",
-                },
-                "episode": {
-                    "type": "integer",
-                    "description": "Episode number (for TV episodes)",
-                },
-                "episode_title": {
-                    "type": "string",
-                    "description": "Episode title for better search accuracy",
-                },
-                "media_type": {
-                    "type": "string",
-                    "description": "The type of media",
-                    "enum": ["movie", "series", "episode", "season"],
-                },
-            },
-            "required": ["title"],
-        },
-    ),
-    Tool(
-        name="launch_on_roku",
-        description=(
-            "Launch content on the Roku device. Call this after find_content with one of the "
-            "returned matches. Provide the channel_id, content_id, and media_type from the "
-            "find_content results."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "channel_id": {
-                    "type": "integer",
-                    "description": "Roku channel ID from find_content results",
-                },
-                "content_id": {
-                    "type": "string",
-                    "description": "Content ID from find_content results",
-                },
-                "media_type": {
-                    "type": "string",
-                    "description": "Media type from find_content results",
-                    "enum": ["movie", "series", "episode", "season"],
-                },
-            },
-            "required": ["channel_id", "content_id"],
-        },
-    ),
-]
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant that controls Roku devices. "
@@ -154,48 +41,55 @@ class ChatMessage(BaseModel):
     session_id: str | None = None
 
 
+# --- Dependency injection helpers ---
+
+
+def get_session_store(request: Request) -> SessionStore:
+    """Get the session store from app state."""
+    return request.app.state.session_store  # type: ignore[no-any-return]
+
+
+def get_http_client(request: Request) -> httpx.AsyncClient:
+    """Get the shared HTTP client from app state."""
+    return request.app.state.http_client  # type: ignore[no-any-return]
+
+
 async def get_llm_provider() -> LLMProvider:
     """Get the configured LLM provider."""
-    api_key = settings.llm_api_key
-    if not api_key:
+    if not settings.llm.api_key:
         raise ValueError("LLM API key is required. Set llm.api_key in config.yml")
+    api_key = settings.llm.api_key.get_secret_value()
 
-    if settings.llm_provider == "anthropic":
+    if settings.llm.provider == "anthropic":
         from ..core.llm.providers.anthropic import AnthropicProvider
 
-        return AnthropicProvider(api_key=api_key, model=settings.llm_model)
-    elif settings.llm_provider == "openai":
+        return AnthropicProvider(api_key=api_key, model=settings.llm.model)
+    elif settings.llm.provider == "openai":
         from ..core.llm.providers.openai import OpenAIProvider
 
-        return OpenAIProvider(api_key=api_key, model=settings.llm_model)
+        return OpenAIProvider(api_key=api_key, model=settings.llm.model)
     else:
-        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+        raise ValueError(f"Unsupported LLM provider: {settings.llm.provider}")
 
 
-async def get_tool_executor() -> ToolExecutor:
-    """Get the configured tool executor."""
-    if settings.tool_executor == "mcp":
+async def get_tool_executor(http_client: httpx.AsyncClient = Depends(get_http_client)) -> ToolExecutor:
+    """Get the configured tool executor using the shared HTTP client."""
+    if settings.tools.executor == "mcp":
         from ..core.llm.tool_executor import MCPToolExecutor
 
         # TODO: Initialize MCP client with proper configuration
         mcp_client = None  # Placeholder
         return MCPToolExecutor(mcp_client)
-    elif settings.tool_executor == "roku_ecp":
-        import httpx
-
-        from ..core.brave_search import BraveSearchClient
-        from ..core.llm.tool_executor import RokuECPToolExecutor
-
-        http_client = httpx.AsyncClient()
+    elif settings.tools.executor == "roku_ecp":
         brave_client = None
-        if settings.brave_api_key:
+        if settings.brave.api_key:
             brave_client = BraveSearchClient(
-                api_key=settings.brave_api_key,
+                api_key=settings.brave.api_key.get_secret_value(),
                 http_client=http_client,
             )
-        return RokuECPToolExecutor(settings.roku_ip, http_client, brave_client)
+        return RokuECPToolExecutor(settings.roku.ip, http_client, brave_client)
     else:
-        raise ValueError(f"Unsupported tool executor: {settings.tool_executor}")
+        raise ValueError(f"Unsupported tool executor: {settings.tools.executor}")
 
 
 @router.websocket("/ws/chat")
@@ -205,8 +99,18 @@ async def websocket_chat(
     tool_executor: ToolExecutor = Depends(get_tool_executor),
 ):
     """WebSocket endpoint for chat with LLM."""
+    # Validate origin if allowed_origins is configured (empty list = allow all)
+    allowed = settings.app.allowed_origins
+    if allowed:
+        origin = websocket.headers.get("origin")
+        if origin and origin not in allowed:
+            await websocket.close(code=4003, reason="Origin not allowed")
+            return
+
     await websocket.accept()
     logger.info("WebSocket connected")
+
+    session_store: SessionStore = websocket.app.state.session_store
 
     try:
         while True:
@@ -230,7 +134,7 @@ async def websocket_chat(
             if not session:
                 config = SessionConfig(
                     system_prompt=SYSTEM_PROMPT,
-                    tools=AVAILABLE_TOOLS,
+                    tools=RokuECPToolExecutor.get_tool_definitions(),
                     max_tokens=2048,
                     max_iterations=10,
                     temperature=0.7,
@@ -272,47 +176,50 @@ async def websocket_chat(
 
 
 @router.post("/roku/launch")
-async def roku_launch(channel_id: int, content_id: str, media_type: str = "movie"):
+async def roku_launch(
+    channel_id: int,
+    content_id: str,
+    media_type: str = "movie",
+    http_client: httpx.AsyncClient = Depends(get_http_client),
+):
     """Direct Roku launch endpoint for frontend use.
 
     Proxies a launch request to the Roku ECP API.
     """
-    import httpx
-
     from ..core.search_and_play import launch_on_roku
 
-    roku_base_url = f"http://{settings.roku_ip}:8060"
-    async with httpx.AsyncClient() as client:
-        result = await launch_on_roku(
-            channel_id=channel_id,
-            content_id=content_id,
-            roku_base_url=roku_base_url,
-            http_client=client,
-            media_type=media_type,
-        )
+    roku_base_url = f"http://{settings.roku.ip}:{ROKU_ECP_PORT}"
+    result = await launch_on_roku(
+        channel_id=channel_id,
+        content_id=content_id,
+        roku_base_url=roku_base_url,
+        http_client=http_client,
+        media_type=media_type,
+    )
     return {"success": result.success, "message": result.message}
 
 
 @router.get("/chat/sessions")
-async def list_sessions():
+async def list_sessions(store: SessionStore = Depends(get_session_store)):
     """List all active chat sessions."""
+    sessions = store.list_sessions()
     return {
-        "sessions": session_store.list_sessions(),
-        "count": len(session_store.list_sessions()),
+        "sessions": sessions,
+        "count": len(sessions),
     }
 
 
 @router.delete("/chat/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, store: SessionStore = Depends(get_session_store)):
     """Delete a chat session."""
-    session_store.delete_session(session_id)
+    store.delete_session(session_id)
     return {"message": f"Session {session_id} deleted"}
 
 
 @router.post("/chat/sessions/{session_id}/reset")
-async def reset_session(session_id: str):
+async def reset_session(session_id: str, store: SessionStore = Depends(get_session_store)):
     """Reset a chat session."""
-    session = session_store.get_session(session_id)
+    session = store.get_session(session_id)
     if session:
         session.reset()
         return {"message": f"Session {session_id} reset"}

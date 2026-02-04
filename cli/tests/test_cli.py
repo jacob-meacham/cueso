@@ -35,23 +35,23 @@ def test_config_instance():
 @pytest.mark.asyncio
 async def test_session_manager():
     """Test session manager basic functionality."""
-    
+
     # Create session manager
     session_manager = SessionManager(Config())
-    
+
     # Test initial state
     assert session_manager.current_session_id is None
-    
+
     # Test creating session
     session_id = await session_manager.create_session()
     assert session_id is not None
     assert session_manager.current_session_id == session_id
-    
+
     # Test switching to existing session
     existing_id = "test-session-123"
     await session_manager.create_session(existing_id)
     assert session_manager.current_session_id == existing_id
-    
+
     # Test getting current session
     current_id = session_manager.get_current_session_id()
     assert current_id == existing_id
@@ -62,14 +62,14 @@ async def test_chat_client():
     """Test chat client basic functionality."""
     # Mock console
     mock_console = MagicMock()
-    
+
     # Create chat client
     chat_client = ChatClient(mock_console)
-    
+
     # Test initial state
     assert not chat_client.is_connected
     assert chat_client.websocket is None
-    
+
     # Test disconnect when not connected
     await chat_client.disconnect()
     assert not chat_client.is_connected

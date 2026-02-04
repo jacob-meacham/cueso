@@ -149,4 +149,3 @@ class Config:
 
     def get_api_base_url(self) -> str:
         return self.api_base_url
-

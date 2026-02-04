@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 # Bootstrap: config file path from env var or default.
@@ -23,6 +23,7 @@ class AppConfig(BaseModel):
     environment: str = "development"
     debug: bool = True
     hostname: str = "localhost"
+    allowed_origins: list[str] = Field(default_factory=list)
 
 
 class LoggingConfig(BaseModel):
@@ -64,7 +65,7 @@ class LLMConfig(BaseModel):
     """LLM provider settings."""
 
     provider: str = "anthropic"
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     model: str = "claude-3-5-sonnet-20241022"
 
 
@@ -84,13 +85,13 @@ class MCPConfig(BaseModel):
     """MCP settings."""
 
     server_url: str = ""
-    server_token: str = ""
+    server_token: SecretStr | None = None
 
 
 class BraveConfig(BaseModel):
     """Brave Search settings."""
 
-    api_key: str | None = None
+    api_key: SecretStr | None = None
 
 
 # --- Top-level settings ---
@@ -139,72 +140,6 @@ class Settings(BaseSettings):
             env_settings,
             YamlConfigSettingsSource(settings_cls, yaml_file=CONFIG_FILE),
         )
-
-    # --- Backward-compatible flat accessors ---
-
-    @property
-    def app_name(self) -> str:
-        return self.app.name
-
-    @property
-    def app_version(self) -> str:
-        return self.app.version
-
-    @property
-    def environment(self) -> str:
-        return self.app.environment
-
-    @property
-    def debug(self) -> bool:
-        return self.app.debug
-
-    @property
-    def hostname(self) -> str:
-        return self.app.hostname
-
-    @property
-    def log_level(self) -> str:
-        return self.logging.level
-
-    @property
-    def host(self) -> str:
-        return self.server.host
-
-    @property
-    def port(self) -> int:
-        return self.server.port
-
-    @property
-    def llm_provider(self) -> str:
-        return self.llm.provider
-
-    @property
-    def llm_api_key(self) -> str | None:
-        return self.llm.api_key
-
-    @property
-    def llm_model(self) -> str:
-        return self.llm.model
-
-    @property
-    def tool_executor(self) -> str:
-        return self.tools.executor
-
-    @property
-    def roku_ip(self) -> str:
-        return self.roku.ip
-
-    @property
-    def mcp_server_url(self) -> str:
-        return self.mcp.server_url
-
-    @property
-    def mcp_server_token(self) -> str:
-        return self.mcp.server_token
-
-    @property
-    def brave_api_key(self) -> str | None:
-        return self.brave.api_key
 
 
 # Global settings instance
