@@ -58,7 +58,7 @@ jobs:
           context: .
           push: true
           tags: |
-            jemonjam/blockbuster:latest
-            jemonjam/blockbuster:${{ github.sha }}
+            jemonjam/cueso:latest
+            jemonjam/cueso:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
