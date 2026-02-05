@@ -5,7 +5,8 @@ import logging
 import uuid
 
 import httpx
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from starlette.requests import HTTPConnection
 from pydantic import BaseModel
 
 from ..core.brave_search import BraveSearchClient
@@ -44,14 +45,14 @@ class ChatMessage(BaseModel):
 # --- Dependency injection helpers ---
 
 
-def get_session_store(request: Request) -> SessionStore:
+def get_session_store(conn: HTTPConnection) -> SessionStore:
     """Get the session store from app state."""
-    return request.app.state.session_store  # type: ignore[no-any-return]
+    return conn.app.state.session_store  # type: ignore[no-any-return]
 
 
-def get_http_client(request: Request) -> httpx.AsyncClient:
+def get_http_client(conn: HTTPConnection) -> httpx.AsyncClient:
     """Get the shared HTTP client from app state."""
-    return request.app.state.http_client  # type: ignore[no-any-return]
+    return conn.app.state.http_client  # type: ignore[no-any-return]
 
 
 async def get_llm_provider() -> LLMProvider:
