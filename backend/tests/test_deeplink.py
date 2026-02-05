@@ -46,9 +46,7 @@ class TestConvertUrlToEcpCommandValidUrls:
         assert result.post_launch_key == "Play"
 
     def test_disney_plus_play_url(self) -> None:
-        result = convert_url_to_ecp_command(
-            "https://www.disneyplus.com/play/f63db666-b097-4c61-99c1-b778de2d4ae1"
-        )
+        result = convert_url_to_ecp_command("https://www.disneyplus.com/play/f63db666-b097-4c61-99c1-b778de2d4ae1")
         assert result is not None
         assert result.channel_id == "291097"
         assert result.channel_name == "Disney+"
@@ -77,9 +75,7 @@ class TestConvertUrlToEcpCommandValidUrls:
         assert result.post_launch_key == "Select"
 
     def test_max_video_watch_url(self) -> None:
-        result = convert_url_to_ecp_command(
-            "https://www.max.com/video/watch/bd43b2a4-1639-4197-96d4-2ec14eb45e9e"
-        )
+        result = convert_url_to_ecp_command("https://www.max.com/video/watch/bd43b2a4-1639-4197-96d4-2ec14eb45e9e")
         assert result is not None
         assert result.channel_id == "61322"
         assert result.channel_name == "HBO Max"
@@ -106,9 +102,7 @@ class TestConvertUrlToEcpCommandValidUrls:
         assert result.post_launch_key == "Select"
 
     def test_max_movies_path(self) -> None:
-        result = convert_url_to_ecp_command(
-            "https://max.com/movies/dune-part-two/9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8"
-        )
+        result = convert_url_to_ecp_command("https://max.com/movies/dune-part-two/9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8")
         assert result is not None
         assert result.channel_id == "61322"
         assert result.channel_name == "HBO Max"
@@ -117,9 +111,7 @@ class TestConvertUrlToEcpCommandValidUrls:
         assert result.post_launch_key == "Select"
 
     def test_max_series_path(self) -> None:
-        result = convert_url_to_ecp_command(
-            "https://max.com/series/the-last-of-us/abc123-def456"
-        )
+        result = convert_url_to_ecp_command("https://max.com/series/the-last-of-us/abc123-def456")
         assert result is not None
         assert result.channel_id == "61322"
         assert result.channel_name == "HBO Max"
@@ -128,9 +120,7 @@ class TestConvertUrlToEcpCommandValidUrls:
         assert result.post_launch_key == "Select"
 
     def test_amazon_gp_video_detail(self) -> None:
-        result = convert_url_to_ecp_command(
-            "https://www.amazon.com/gp/video/detail/B0DKTFF815"
-        )
+        result = convert_url_to_ecp_command("https://www.amazon.com/gp/video/detail/B0DKTFF815")
         assert result is not None
         assert result.channel_id == "13"
         assert result.channel_name == "Prime Video"
@@ -139,9 +129,7 @@ class TestConvertUrlToEcpCommandValidUrls:
         assert result.post_launch_key == "Select"
 
     def test_amazon_gp_video_with_ref(self) -> None:
-        result = convert_url_to_ecp_command(
-            "https://amazon.com/gp/video/detail/B0FQM41JFJ/ref=xyz"
-        )
+        result = convert_url_to_ecp_command("https://amazon.com/gp/video/detail/B0FQM41JFJ/ref=xyz")
         assert result is not None
         assert result.channel_id == "13"
         assert result.channel_name == "Prime Video"
@@ -159,9 +147,7 @@ class TestConvertUrlToEcpCommandValidUrls:
         assert result.post_launch_key == "Select"
 
     def test_primevideo_detail(self) -> None:
-        result = convert_url_to_ecp_command(
-            "https://www.primevideo.com/detail/B0EXAMPL12"
-        )
+        result = convert_url_to_ecp_command("https://www.primevideo.com/detail/B0EXAMPL12")
         assert result is not None
         assert result.channel_id == "13"
         assert result.channel_name == "Prime Video"
@@ -305,9 +291,7 @@ class TestEndToEndUrlToPlayback:
             ("https://www.amazon.com/gp/video/detail/B0DKTFF815", "13", "Select"),
         ],
     )
-    def test_url_to_playback_pipeline(
-        self, url: str, expected_channel_id: str, expected_key: str
-    ) -> None:
+    def test_url_to_playback_pipeline(self, url: str, expected_channel_id: str, expected_key: str) -> None:
         extraction = convert_url_to_ecp_command(url)
         assert extraction is not None
         assert extraction.channel_id == expected_channel_id
