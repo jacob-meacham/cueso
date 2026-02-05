@@ -17,6 +17,8 @@ from app.core.streaming import (
 
 
 class TestMatchUrlNetflix:
+    r"""Netflix URL tests per roku-deeplink-spec pattern: netflix\.com/(?:watch|title)/(\d+)"""
+
     def test_title_url(self) -> None:
         result = match_url("https://www.netflix.com/title/81231974")
         assert result is not None
@@ -31,21 +33,26 @@ class TestMatchUrlNetflix:
         assert service is NETFLIX
         assert content_id == "81231974"
 
-    def test_regional_url(self) -> None:
-        result = match_url("https://www.netflix.com/gb/title/81231974")
+    def test_without_www(self) -> None:
+        result = match_url("https://netflix.com/watch/12345")
         assert result is not None
         service, content_id = result
         assert service is NETFLIX
-        assert content_id == "81231974"
+        assert content_id == "12345"
 
-    def test_regional_with_subcode(self) -> None:
-        result = match_url("https://www.netflix.com/en-US/title/81231974")
-        assert result is not None
-        _, content_id = result
-        assert content_id == "81231974"
+    def test_regional_url_not_supported(self) -> None:
+        """Regional URLs like /gb/title/ are not supported per roku-deeplink-spec."""
+        result = match_url("https://www.netflix.com/gb/title/81231974")
+        assert result is None
 
 
 class TestMatchUrlAmazon:
+    r"""Amazon/Prime Video URL tests per roku-deeplink-spec.
+
+    Pattern: (?:amazon\.com|primevideo\.com)/.*?/(B[A-Z0-9]{9})
+    ASIN format: B + 9 uppercase alphanumeric characters.
+    """
+
     def test_video_detail_url(self) -> None:
         result = match_url("https://www.amazon.com/gp/video/detail/B07ZPDN57Q")
         assert result is not None
@@ -60,19 +67,13 @@ class TestMatchUrlAmazon:
         assert service is AMAZON_PRIME
         assert content_id == "B07ZPDN57Q"
 
-    def test_primevideo_url(self) -> None:
-        result = match_url("https://www.primevideo.com/detail/Severance/0FDIT8JCDQ4JC56IXP5UN4UM1W")
+    def test_primevideo_detail_asin(self) -> None:
+        """Prime Video with ASIN format ID."""
+        result = match_url("https://www.primevideo.com/detail/B0EXAMPL12")
         assert result is not None
         service, content_id = result
         assert service is AMAZON_PRIME
-        assert content_id == "0FDIT8JCDQ4JC56IXP5UN4UM1W"
-
-    def test_primevideo_regional_url(self) -> None:
-        result = match_url("https://www.primevideo.com/-/tr/detail/Severance/0FDIT8JCDQ4JC56IXP5UN4UM1W")
-        assert result is not None
-        service, content_id = result
-        assert service is AMAZON_PRIME
-        assert content_id == "0FDIT8JCDQ4JC56IXP5UN4UM1W"
+        assert content_id == "B0EXAMPL12"
 
     def test_long_dp_url(self) -> None:
         result = match_url("https://www.amazon.com/Severance-Season-2/dp/B0DSQ72YH5")
@@ -80,6 +81,12 @@ class TestMatchUrlAmazon:
         service, content_id = result
         assert service is AMAZON_PRIME
         assert content_id == "B0DSQ72YH5"
+
+    def test_non_asin_format_not_supported(self) -> None:
+        """Non-ASIN IDs are not supported per roku-deeplink-spec."""
+        # This ID doesn't start with B and isn't 10 chars
+        result = match_url("https://www.primevideo.com/detail/Severance/0FDIT8JCDQ4JC56IXP5UN4UM1W")
+        assert result is None
 
 
 class TestMatchUrlHulu:
@@ -108,48 +115,84 @@ class TestMatchUrlHulu:
 
 
 class TestMatchUrlDisneyPlus:
-    def test_movies_url(self) -> None:
+    r"""Disney+ URL tests per roku-deeplink-spec.
+
+    Pattern: disneyplus\.com/(?:(?:play|video)/|browse/entity-)([a-f0-9-]+)
+    Supports /play/, /video/, and /browse/entity- paths with UUID-format content IDs.
+    """
+
+    def test_play_url(self) -> None:
+        result = match_url("https://www.disneyplus.com/play/f63db666-b097-4c61-99c1-b778de2d4ae1")
+        assert result is not None
+        service, content_id = result
+        assert service is DISNEY_PLUS
+        assert content_id == "f63db666-b097-4c61-99c1-b778de2d4ae1"
+
+    def test_video_url(self) -> None:
+        result = match_url("https://disneyplus.com/video/abc-123-def")
+        assert result is not None
+        service, content_id = result
+        assert service is DISNEY_PLUS
+        assert content_id == "abc-123-def"
+
+    def test_browse_entity_url(self) -> None:
+        """The /browse/entity- path is supported per roku-deeplink-spec."""
+        result = match_url("https://www.disneyplus.com/browse/entity-f63db666-b097-4c61-99c1-b778de2d4ae1")
+        assert result is not None
+        service, content_id = result
+        assert service is DISNEY_PLUS
+        assert content_id == "f63db666-b097-4c61-99c1-b778de2d4ae1"
+
+    def test_movies_path_not_supported(self) -> None:
+        """The /movies/ path is not supported per roku-deeplink-spec."""
         result = match_url("https://www.disneyplus.com/movies/encanto/abc123def456")
-        assert result is not None
-        service, content_id = result
-        assert service is DISNEY_PLUS
-        assert content_id == "abc123def456"
-
-    def test_series_url(self) -> None:
-        result = match_url("https://www.disneyplus.com/series/the-mandalorian/3jLIGMDYINqD")
-        assert result is not None
-        service, content_id = result
-        assert service is DISNEY_PLUS
-        assert content_id == "3jLIGMDYINqD"
-
-    def test_regional_url(self) -> None:
-        result = match_url("https://www.disneyplus.com/en-GB/movies/encanto/abc123def456")
-        assert result is not None
-        _, content_id = result
-        assert content_id == "abc123def456"
+        assert result is None
 
 
 class TestMatchUrlMax:
-    def test_show_uuid_url(self) -> None:
-        result = match_url("https://play.max.com/show/9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8")
+    r"""Max/HBO Max URL tests per roku-deeplink-spec.
+
+    Pattern: (?:max\.com|hbomax\.com)/(?:(?:movies|series)/[^/]+/|(?:video/watch|play)/)([^/?]+)
+    Supports both max.com and legacy hbomax.com domains.
+    Supports /movies/{title}/, /series/{title}/, /video/watch/, and /play/ paths.
+    """
+
+    def test_video_watch_url(self) -> None:
+        result = match_url("https://www.max.com/video/watch/bd43b2a4-1639-4197-96d4-2ec14eb45e9e")
+        assert result is not None
+        service, content_id = result
+        assert service is MAX
+        assert content_id == "bd43b2a4-1639-4197-96d4-2ec14eb45e9e"
+
+    def test_play_url(self) -> None:
+        result = match_url("https://max.com/play/some-show-id")
+        assert result is not None
+        service, content_id = result
+        assert service is MAX
+        assert content_id == "some-show-id"
+
+    def test_hbomax_legacy_domain(self) -> None:
+        result = match_url("https://www.hbomax.com/video/watch/legacy-id")
+        assert result is not None
+        service, content_id = result
+        assert service is MAX
+        assert content_id == "legacy-id"
+
+    def test_movies_path(self) -> None:
+        """The /movies/{title}/ path is supported per roku-deeplink-spec."""
+        result = match_url("https://max.com/movies/dune-part-two/9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8")
         assert result is not None
         service, content_id = result
         assert service is MAX
         assert content_id == "9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8"
 
-    def test_movie_uuid_url(self) -> None:
-        result = match_url("https://max.com/movie/9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8")
+    def test_series_path(self) -> None:
+        """The /series/{title}/ path is supported per roku-deeplink-spec."""
+        result = match_url("https://max.com/series/the-last-of-us/abc123-def456")
         assert result is not None
         service, content_id = result
         assert service is MAX
-        assert content_id == "9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8"
-
-    def test_episode_uuid_url(self) -> None:
-        result = match_url("https://play.max.com/episode/9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8")
-        assert result is not None
-        service, content_id = result
-        assert service is MAX
-        assert content_id == "9ec0e921-1b4a-4c2e-8e5d-f3a4b5c6d7e8"
+        assert content_id == "abc123-def456"
 
 
 class TestMatchUrlAppleTVPlus:
@@ -242,6 +285,7 @@ class TestGetSiteFilters:
         assert "site:hulu.com" in result
         assert "site:disneyplus.com" in result
         assert "site:max.com" in result
+        assert "site:hbomax.com" in result  # Legacy domain per spec
         assert "site:tv.apple.com" in result
         assert "site:amazon.com" in result
         assert "site:primevideo.com" in result

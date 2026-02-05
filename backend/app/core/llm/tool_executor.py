@@ -92,10 +92,10 @@ TOOL_DEFINITIONS: list[Tool] = [
         name="find_content",
         description=(
             "Search streaming services (Netflix, Hulu, Disney+, Max, Apple TV+, Amazon Prime) "
-            "for content and return all available matches with channel IDs and content IDs. "
-            "Use this when you know the exact content to find. The results include every "
-            "streaming service where the content is available. After calling this, use "
-            "launch_on_roku to play the best match (or ask the user which service they prefer)."
+            "for content and return all available matches with channel IDs, content IDs, media_type, "
+            "and post_launch_key. Use this when you know the exact content to find. The results "
+            "include every streaming service where the content is available. After calling this, "
+            "use launch_on_roku with the returned values to play content."
         ),
         input_schema={
             "type": "object",
@@ -129,8 +129,9 @@ TOOL_DEFINITIONS: list[Tool] = [
         name="launch_on_roku",
         description=(
             "Launch content on the Roku device. Call this after find_content with one of the "
-            "returned matches. Provide the channel_id, content_id, and media_type from the "
-            "find_content results."
+            "returned matches. Provide the channel_id, content_id, media_type, and post_launch_key "
+            "from the find_content results. This executes an action sequence: launch the app, "
+            "wait 2 seconds, then press the appropriate key to start playback."
         ),
         input_schema={
             "type": "object",
@@ -147,6 +148,12 @@ TOOL_DEFINITIONS: list[Tool] = [
                     "type": "string",
                     "description": "Media type from find_content results",
                     "enum": ["movie", "series", "episode", "season"],
+                },
+                "post_launch_key": {
+                    "type": "string",
+                    "description": "Key to press after launch (from find_content results)",
+                    "enum": ["Play", "Select"],
+                    "default": "Select",
                 },
             },
             "required": ["channel_id", "content_id"],
@@ -242,6 +249,7 @@ class RokuECPToolExecutor(ToolExecutor):
         channel_id = arguments.get("channel_id")
         content_id = arguments.get("content_id")
         media_type = arguments.get("media_type", "movie")
+        post_launch_key = arguments.get("post_launch_key", "Select")
 
         if not channel_id or not content_id:
             return json.dumps({"success": False, "message": "channel_id and content_id are required."})
@@ -252,5 +260,6 @@ class RokuECPToolExecutor(ToolExecutor):
             roku_base_url=self.base_url,
             http_client=self.http_client,
             media_type=media_type,
+            post_launch_key=post_launch_key,
         )
         return json.dumps({"success": result.success, "message": result.message})

@@ -1,9 +1,10 @@
 """Content search and Roku launch pipeline.
 
 search_content() — Brave Search → URL match → returns ALL matches across services.
-launch_on_roku()  — POST to Roku ECP /launch/{channelId} with contentId.
+launch_on_roku()  — Execute action sequence: launch → wait 2000ms → keypress.
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import asdict, dataclass
@@ -11,7 +12,7 @@ from dataclasses import asdict, dataclass
 import httpx
 
 from .brave_search import BraveSearchClient, BraveSearchError
-from .streaming import StreamingService, get_active_services, get_site_filters, match_url
+from .streaming import StreamingService, get_active_services, get_site_filters, match_url_full
 
 logger = logging.getLogger("cueso.search_and_play")
 
@@ -26,6 +27,7 @@ class ContentMatch:
     source_url: str
     title: str
     media_type: str
+    post_launch_key: str = "Select"  # Key to press after launch (Play for Netflix)
 
 
 @dataclass
@@ -121,26 +123,26 @@ async def search_content(
     seen_services: set[str] = set()
 
     for result in results:
-        matched = match_url(result.url, services=target_services)
+        matched = match_url_full(result.url, services=target_services)
         if matched:
-            service, content_id = matched
-            if service.name in seen_services:
+            if matched.service.name in seen_services:
                 continue
-            seen_services.add(service.name)
+            seen_services.add(matched.service.name)
             matches.append(
                 ContentMatch(
-                    service_name=service.name,
-                    channel_id=service.roku_channel_id,
-                    content_id=content_id,
+                    service_name=matched.service.name,
+                    channel_id=matched.service.roku_channel_id,
+                    content_id=matched.content_id,
                     source_url=result.url,
                     title=result.title,
-                    media_type=media_type or service.default_media_type,
+                    media_type=media_type or matched.media_type,
+                    post_launch_key=matched.post_launch_key,
                 )
             )
             logger.info(
                 "Matched: service=%s content_id=%s url=%s",
-                service.name,
-                content_id,
+                matched.service.name,
+                matched.content_id,
                 result.url,
             )
 
@@ -168,8 +170,14 @@ async def launch_on_roku(
     roku_base_url: str,
     http_client: httpx.AsyncClient,
     media_type: str = "movie",
+    post_launch_key: str = "Select",
 ) -> LaunchResult:
-    """Launch content on Roku via ECP.
+    """Launch content on Roku via ECP using action sequence.
+
+    Executes the roku-deeplink-spec action sequence:
+    1. POST /launch/{channel_id}?contentId={id}&mediaType={type}
+    2. Wait 2000ms for app to load
+    3. POST /keypress/{key} (Play for Netflix, Select for others)
 
     Args:
         channel_id: Roku channel ID (e.g. 12 for Netflix).
@@ -177,10 +185,12 @@ async def launch_on_roku(
         roku_base_url: Roku ECP base URL (e.g. "http://192.168.1.100:8060").
         http_client: Shared httpx client.
         media_type: Roku mediaType param (default "movie").
+        post_launch_key: Key to press after launch (default "Select").
 
     Returns:
         LaunchResult with success status.
     """
+    # Step 1: Launch the channel with deep link params
     launch_url = f"{roku_base_url}/launch/{channel_id}"
     params = {"contentId": content_id, "mediaType": media_type}
     logger.info("Launching Roku: POST %s params=%s", launch_url, params)
@@ -190,15 +200,39 @@ async def launch_on_roku(
     except httpx.RequestError as e:
         return LaunchResult(success=False, message=f"Roku connection failed: {e}")
 
-    if response.status_code == 200:
-        return LaunchResult(
-            success=True,
-            message=f"Launched channel {channel_id} with content ID {content_id}.",
-            status_code=200,
-        )
-    else:
+    if response.status_code != 200:
         return LaunchResult(
             success=False,
-            message=f"Roku returned status {response.status_code}.",
+            message=f"Roku launch returned status {response.status_code}.",
             status_code=response.status_code,
         )
+
+    # Step 2: Wait 2000ms for app to load
+    logger.info("Waiting 2000ms for app to load...")
+    await asyncio.sleep(2.0)
+
+    # Step 3: Press the post-launch key
+    keypress_url = f"{roku_base_url}/keypress/{post_launch_key}"
+    logger.info("Sending keypress: POST %s", keypress_url)
+
+    try:
+        key_response = await http_client.post(keypress_url, timeout=10.0)
+    except httpx.RequestError as e:
+        return LaunchResult(
+            success=False,
+            message=f"Launch succeeded but keypress failed: {e}",
+            status_code=200,
+        )
+
+    if key_response.status_code != 200:
+        return LaunchResult(
+            success=False,
+            message=f"Launch succeeded but keypress returned status {key_response.status_code}.",
+            status_code=key_response.status_code,
+        )
+
+    return LaunchResult(
+        success=True,
+        message=f"Launched channel {channel_id} with content ID {content_id}, pressed {post_launch_key}.",
+        status_code=200,
+    )

@@ -185,8 +185,11 @@ class TestSearchContentServiceSubset:
 
 
 class TestLaunchOnRoku:
+    """Tests for launch_on_roku action sequence (launch → wait → keypress)."""
+
     @pytest.mark.asyncio
-    async def test_successful_launch(self, mock_http_client: AsyncMock) -> None:
+    async def test_successful_launch_action_sequence(self, mock_http_client: AsyncMock) -> None:
+        """Test full action sequence: launch, wait, keypress."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_http_client.post.return_value = mock_response
@@ -200,11 +203,35 @@ class TestLaunchOnRoku:
 
         assert result.success is True
         assert result.status_code == 200
-        mock_http_client.post.assert_called_once()
-        call_args = mock_http_client.post.call_args
-        assert "/launch/12" in call_args.args[0]
-        assert call_args.kwargs["params"]["contentId"] == "81231974"
-        assert call_args.kwargs["params"]["mediaType"] == "movie"
+        # Should call POST twice: launch + keypress
+        assert mock_http_client.post.call_count == 2
+
+        calls = mock_http_client.post.call_args_list
+        # First call: launch
+        assert "/launch/12" in calls[0].args[0]
+        assert calls[0].kwargs["params"]["contentId"] == "81231974"
+        assert calls[0].kwargs["params"]["mediaType"] == "movie"
+        # Second call: keypress (default is Select)
+        assert "/keypress/Select" in calls[1].args[0]
+
+    @pytest.mark.asyncio
+    async def test_netflix_uses_play_key(self, mock_http_client: AsyncMock) -> None:
+        """Test that Netflix uses Play key instead of Select."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_http_client.post.return_value = mock_response
+
+        result = await launch_on_roku(
+            channel_id=12,
+            content_id="81231974",
+            roku_base_url=ROKU_BASE_URL,
+            http_client=mock_http_client,
+            post_launch_key="Play",
+        )
+
+        assert result.success is True
+        calls = mock_http_client.post.call_args_list
+        assert "/keypress/Play" in calls[1].args[0]
 
     @pytest.mark.asyncio
     async def test_launch_failure_status(self, mock_http_client: AsyncMock) -> None:
@@ -221,6 +248,8 @@ class TestLaunchOnRoku:
 
         assert result.success is False
         assert "status 500" in result.message
+        # Should only call launch once (fails before keypress)
+        assert mock_http_client.post.call_count == 1
 
     @pytest.mark.asyncio
     async def test_launch_network_error(self, mock_http_client: AsyncMock) -> None:
@@ -237,7 +266,7 @@ class TestLaunchOnRoku:
         assert "Roku connection failed" in result.message
 
     @pytest.mark.asyncio
-    async def test_media_type_in_url(self, mock_http_client: AsyncMock) -> None:
+    async def test_media_type_in_params(self, mock_http_client: AsyncMock) -> None:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_http_client.post.return_value = mock_response
@@ -250,5 +279,24 @@ class TestLaunchOnRoku:
             media_type="episode",
         )
 
-        call_args = mock_http_client.post.call_args
-        assert call_args.kwargs["params"]["mediaType"] == "episode"
+        calls = mock_http_client.post.call_args_list
+        assert calls[0].kwargs["params"]["mediaType"] == "episode"
+
+    @pytest.mark.asyncio
+    async def test_keypress_failure_after_successful_launch(self, mock_http_client: AsyncMock) -> None:
+        """Test handling when launch succeeds but keypress fails."""
+        launch_response = MagicMock()
+        launch_response.status_code = 200
+        keypress_response = MagicMock()
+        keypress_response.status_code = 500
+        mock_http_client.post.side_effect = [launch_response, keypress_response]
+
+        result = await launch_on_roku(
+            channel_id=12,
+            content_id="12345",
+            roku_base_url=ROKU_BASE_URL,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is False
+        assert "keypress returned status 500" in result.message

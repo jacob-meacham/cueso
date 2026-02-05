@@ -16,6 +16,14 @@ class StreamingService:
     domains: tuple[str, ...]
     url_patterns: tuple[re.Pattern[str], ...] = field(repr=False)
     default_media_type: str = "movie"
+    post_launch_key: str = "Select"  # Key to press after launch (Play for Netflix)
+    media_type_from_url: bool = False  # Whether to detect media_type from URL path
+
+    def get_media_type(self, url: str) -> str:
+        """Determine media type from URL or return default."""
+        if self.media_type_from_url and "/title/" in url:
+            return "series"
+        return self.default_media_type
 
 
 # --- Service Definitions ---
@@ -25,9 +33,11 @@ NETFLIX = StreamingService(
     roku_channel_id=12,
     domains=("netflix.com",),
     url_patterns=(
-        re.compile(r"netflix\.com/(?:\w{2}(?:-\w{2})?/)?title/(\d+)"),
-        re.compile(r"netflix\.com/(?:\w{2}(?:-\w{2})?/)?watch/(\d+)"),
+        # Per roku-deeplink-spec: netflix\.com/(?:watch|title)/(\d+)
+        re.compile(r"netflix\.com/(?:watch|title)/(\d+)"),
     ),
+    post_launch_key="Play",
+    media_type_from_url=True,  # /watch/ = movie, /title/ = series
 )
 
 AMAZON_PRIME = StreamingService(
@@ -35,9 +45,9 @@ AMAZON_PRIME = StreamingService(
     roku_channel_id=13,
     domains=("amazon.com", "primevideo.com"),
     url_patterns=(
-        re.compile(r"amazon\.com/gp/video/detail/([A-Z0-9]{10,})"),
-        re.compile(r"amazon\.com/(?:[^/]+/)?dp/([A-Z0-9]{10,})"),
-        re.compile(r"primevideo\.com/(?:[a-z-]+/)*detail/(?:[^/]+/)?([A-Z0-9]{10,})"),
+        # Per roku-deeplink-spec: (?:amazon\.com|primevideo\.com)/.*?/([B][A-Z0-9]{9})
+        # ASIN format: B + 9 alphanumeric characters
+        re.compile(r"(?:amazon\.com|primevideo\.com)/.*?/(B[A-Z0-9]{9})"),
     ),
 )
 
@@ -58,22 +68,20 @@ DISNEY_PLUS = StreamingService(
     roku_channel_id=291097,
     domains=("disneyplus.com",),
     url_patterns=(
-        re.compile(
-            r"disneyplus\.com/(?:\w{2}(?:-\w{2})?/)?"
-            r"(?:movies|series|video)/[^/]+/([0-9A-Za-z]{12})"
-        ),
+        # Per roku-deeplink-spec: disneyplus\.com/(?:(?:play|video)/|browse/entity-)([a-f0-9-]+)
+        # Supports /play/, /video/, and /browse/entity- paths with UUID format
+        re.compile(r"disneyplus\.com/(?:(?:play|video)/|browse/entity-)([a-f0-9-]+)"),
     ),
 )
 
 MAX = StreamingService(
     name="max",
     roku_channel_id=61322,
-    domains=("max.com", "play.max.com"),
+    domains=("max.com", "hbomax.com"),
     url_patterns=(
-        re.compile(
-            r"(?:play\.)?max\.com/(?:movie|show|episode|season|video)/"
-            r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
-        ),
+        # Per roku-deeplink-spec: (?:max\.com|hbomax\.com)/(?:(?:movies|series)/[^/]+/|(?:video/watch|play)/)([^/?]+)
+        # Supports /movies/{title}/, /series/{title}/, /video/watch/, and /play/ paths
+        re.compile(r"(?:max\.com|hbomax\.com)/(?:(?:movies|series)/[^/]+/|(?:video/watch|play)/)([^/?]+)"),
     ),
 )
 
@@ -127,6 +135,16 @@ def get_active_services() -> list[StreamingService]:
 STREAMING_SERVICES: list[StreamingService] = get_active_services()
 
 
+@dataclass
+class UrlMatchResult:
+    """Result of matching a URL to a streaming service."""
+
+    service: StreamingService
+    content_id: str
+    media_type: str
+    post_launch_key: str
+
+
 def match_url(url: str, services: list[StreamingService] | None = None) -> tuple[StreamingService, str] | None:
     """Match a URL to a streaming service and extract its content ID.
 
@@ -140,6 +158,28 @@ def match_url(url: str, services: list[StreamingService] | None = None) -> tuple
             m = pattern.search(url)
             if m:
                 return service, m.group(1)
+    return None
+
+
+def match_url_full(url: str, services: list[StreamingService] | None = None) -> UrlMatchResult | None:
+    """Match a URL to a streaming service with full extraction details.
+
+    Tries services in priority order, returns the first match with
+    media_type and post_launch_key.
+
+    Returns:
+        UrlMatchResult or None if no match.
+    """
+    for service in services or get_active_services():
+        for pattern in service.url_patterns:
+            m = pattern.search(url)
+            if m:
+                return UrlMatchResult(
+                    service=service,
+                    content_id=m.group(1),
+                    media_type=service.get_media_type(url),
+                    post_launch_key=service.post_launch_key,
+                )
     return None
 
 

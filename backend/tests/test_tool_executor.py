@@ -255,7 +255,7 @@ async def test_find_content_tool_no_brave() -> None:
 
 @pytest.mark.asyncio
 async def test_launch_on_roku_tool_success() -> None:
-    """Test launch_on_roku calls Roku ECP and returns result."""
+    """Test launch_on_roku calls Roku ECP with action sequence (launch + keypress)."""
     import json
 
     mock_http_client = MagicMock()
@@ -269,7 +269,8 @@ async def test_launch_on_roku_tool_success() -> None:
 
     parsed = json.loads(result)
     assert parsed["success"] is True
-    mock_http_client.post.assert_called_once()
+    # Should call POST twice: launch + keypress (per roku-deeplink-spec)
+    assert mock_http_client.post.call_count == 2
 
 
 @pytest.mark.asyncio
