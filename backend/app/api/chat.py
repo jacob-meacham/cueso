@@ -6,8 +6,8 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from starlette.requests import HTTPConnection
 from pydantic import BaseModel
+from starlette.requests import HTTPConnection
 
 from ..core.brave_search import BraveSearchClient
 from ..core.config import settings
