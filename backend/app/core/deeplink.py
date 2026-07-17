@@ -1,7 +1,11 @@
-"""Roku ECP URL-to-Playback conversion per roku-deeplink-spec.
+"""Roku ECP URL-to-Playback conversion.
 
-This module implements the spec from https://github.com/jacob-meacham/roku-deeplink-spec
-for converting streaming service URLs into Roku ECP playback commands.
+Generated from the `roku-deeplink` spec-library v1.2.0 via speclib
+(https://github.com/jacob-meacham/roku-deeplink-spec, tag v1.2.0).
+
+Implements 4 of the spec's URL-addressed channels: Netflix, Disney+, HBO Max,
+and Prime Video. Emby (channel 44191, descriptor-addressed, launch-only) is
+out of scope for cueso and intentionally omitted from the catalog below.
 
 Two core functions:
 - convert_url_to_ecp_command(url) -> ExtractionResult | None

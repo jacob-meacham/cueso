@@ -1,0 +1,13 @@
+[[package]]
+name = 'roku-deeplink'
+source = '/code/jacob/roku-deeplink-spec'
+version = '1.2.0'
+commit = '9965515bdb722d15a5d7408d942f9003e84cef49'
+spec_hash = 'sha256:b8fac2755468ad24eb5c20031581151319013bd2718811e1fac03e83b3684a60'
+language = 'python'
+path = 'app/core'
+generated_commit = '9965515bdb722d15a5d7408d942f9003e84cef49'
+generated_at = '2026-07-17T22:09:31Z'
+generator = 'claude-code'
+fixture_status = 'pass'
+test_command = 'uv run pytest tests/test_deeplink.py -q'

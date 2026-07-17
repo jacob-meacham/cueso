@@ -1,0 +1,267 @@
+{
+  "valid_urls": [
+    {
+      "url": "https://www.netflix.com/watch/81444554",
+      "expected": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "81444554",
+        "media_type": "movie",
+        "post_launch_key": "Play"
+      }
+    },
+    {
+      "url": "https://netflix.com/watch/12345",
+      "expected": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "12345",
+        "media_type": "movie",
+        "post_launch_key": "Play"
+      }
+    },
+    {
+      "url": "https://www.netflix.com/title/80179766",
+      "expected": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "80179766",
+        "media_type": "series",
+        "post_launch_key": "Play"
+      }
+    },
+    {
+      "url": "https://www.disneyplus.com/play/f63db666-b097-4c61-99c1-b778de2d4ae1",
+      "expected": {
+        "channel_id": "291097",
+        "channel_name": "Disney+",
+        "content_id": "f63db666-b097-4c61-99c1-b778de2d4ae1",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://disneyplus.com/video/abc-123-def",
+      "expected": {
+        "channel_id": "291097",
+        "channel_name": "Disney+",
+        "content_id": "abc-123-def",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://www.max.com/video/watch/bd43b2a4-1639-4197-96d4-2ec14eb45e9e",
+      "expected": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "bd43b2a4-1639-4197-96d4-2ec14eb45e9e",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://max.com/play/some-show-id",
+      "expected": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "some-show-id",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://www.hbomax.com/video/watch/legacy-id",
+      "expected": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "legacy-id",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://www.amazon.com/gp/video/detail/B0DKTFF815",
+      "expected": {
+        "channel_id": "13",
+        "channel_name": "Prime Video",
+        "content_id": "B0DKTFF815",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://amazon.com/gp/video/detail/B0FQM41JFJ/ref=xyz",
+      "expected": {
+        "channel_id": "13",
+        "channel_name": "Prime Video",
+        "content_id": "B0FQM41JFJ",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://amazon.com/dp/B0FQM41JFJ/ref=xyz",
+      "expected": {
+        "channel_id": "13",
+        "channel_name": "Prime Video",
+        "content_id": "B0FQM41JFJ",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://www.primevideo.com/detail/B0EXAMPL12",
+      "expected": {
+        "channel_id": "13",
+        "channel_name": "Prime Video",
+        "content_id": "B0EXAMPL12",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    }
+  ],
+  "invalid_urls": [
+    {
+      "url": "https://netflix.com/browse",
+      "description": "Netflix browse page, not a content URL"
+    },
+    {
+      "url": "https://netflix.com/",
+      "description": "Netflix root page"
+    },
+    {
+      "url": "https://www.netflix.com/search?q=test",
+      "description": "Netflix search page"
+    },
+    {
+      "url": "https://disneyplus.com/browse",
+      "description": "Disney+ browse page"
+    },
+    {
+      "url": "https://disneyplus.com/",
+      "description": "Disney+ root page"
+    },
+    {
+      "url": "https://max.com/browse",
+      "description": "HBO Max browse page"
+    },
+    {
+      "url": "https://max.com/",
+      "description": "HBO Max root page"
+    },
+    {
+      "url": "https://amazon.com/browse",
+      "description": "Amazon browse page"
+    },
+    {
+      "url": "https://www.amazon.com/",
+      "description": "Amazon root page"
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=abc123",
+      "description": "Unsupported streaming service"
+    },
+    {
+      "url": "https://www.google.com/",
+      "description": "Not a streaming service at all"
+    }
+  ],
+  "playback_commands": [
+    {
+      "input": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "81444554",
+        "media_type": "movie",
+        "post_launch_key": "Play"
+      },
+      "expected": {
+        "type": "action_sequence",
+        "actions": [
+          {"type": "launch", "channel_id": "12", "params": "contentId=81444554&mediaType=movie"},
+          {"type": "wait", "milliseconds": 2000},
+          {"type": "keypress", "key": "Play", "count": 1}
+        ]
+      }
+    },
+    {
+      "input": {
+        "channel_id": "291097",
+        "channel_name": "Disney+",
+        "content_id": "f63db666-b097-4c61-99c1-b778de2d4ae1",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      },
+      "expected": {
+        "type": "action_sequence",
+        "actions": [
+          {"type": "launch", "channel_id": "291097", "params": "contentId=f63db666-b097-4c61-99c1-b778de2d4ae1&mediaType=movie"},
+          {"type": "wait", "milliseconds": 2000},
+          {"type": "keypress", "key": "Select", "count": 1}
+        ]
+      }
+    },
+    {
+      "input": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "bd43b2a4-1639-4197-96d4-2ec14eb45e9e",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      },
+      "expected": {
+        "type": "action_sequence",
+        "actions": [
+          {"type": "launch", "channel_id": "61322", "params": "contentId=bd43b2a4-1639-4197-96d4-2ec14eb45e9e&mediaType=movie"},
+          {"type": "wait", "milliseconds": 2000},
+          {"type": "keypress", "key": "Select", "count": 1}
+        ]
+      }
+    },
+    {
+      "input": {
+        "channel_id": "13",
+        "channel_name": "Prime Video",
+        "content_id": "B0DKTFF815",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      },
+      "expected": {
+        "type": "action_sequence",
+        "actions": [
+          {"type": "launch", "channel_id": "13", "params": "contentId=B0DKTFF815&mediaType=movie"},
+          {"type": "wait", "milliseconds": 2000},
+          {"type": "keypress", "key": "Select", "count": 1}
+        ]
+      }
+    },
+    {
+      "input": {
+        "channel_id": "44191",
+        "channel_name": "Emby",
+        "content_id": "3f9a1c"
+      },
+      "expected": {
+        "type": "action_sequence",
+        "actions": [
+          {"type": "launch", "channel_id": "44191", "params": "Command=PlayNow&ItemIds=3f9a1c"}
+        ]
+      }
+    },
+    {
+      "input": {
+        "channel_id": "44191",
+        "channel_name": "Emby",
+        "content_id": "3f9a1c",
+        "resume_position_ticks": 12000000000
+      },
+      "expected": {
+        "type": "action_sequence",
+        "actions": [
+          {"type": "launch", "channel_id": "44191", "params": "Command=PlayNow&ItemIds=3f9a1c&StartPositionTicks=12000000000"}
+        ]
+      }
+    }
+  ]
+}

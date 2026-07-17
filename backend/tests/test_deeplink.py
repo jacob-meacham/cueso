@@ -1,7 +1,12 @@
 """Tests for the deeplink module per roku-deeplink-spec.
 
 Test fixtures from https://github.com/jacob-meacham/roku-deeplink-spec/blob/main/test_fixtures.json
+(materialized via speclib into deeplink_fixtures.json, v1.2.0).
 """
+
+import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,6 +18,14 @@ from app.core.deeplink import (
     build_playback_command,
     convert_url_to_ecp_command,
 )
+
+FIXTURES: dict[str, Any] = json.loads((Path(__file__).parent / "deeplink_fixtures.json").read_text())
+
+# cueso only implements the 4 URL-addressed channels from the spec (Netflix, Disney+,
+# HBO Max, Prime Video). Emby (channel_id 44191) is descriptor-addressed and out of
+# scope, so fixture cases referencing it are skipped below.
+CUESO_CHANNEL_IDS = {"12", "291097", "61322", "13"}
+_PLAYBACK_FIXTURES = [c for c in FIXTURES["playback_commands"] if c["input"]["channel_id"] in CUESO_CHANNEL_IDS]
 
 
 class TestConvertUrlToEcpCommandValidUrls:
@@ -300,3 +313,60 @@ class TestEndToEndUrlToPlayback:
         assert command.type == "action_sequence"
         assert command.actions[0].channel_id == expected_channel_id
         assert command.actions[2].key == expected_key
+
+
+class TestFixtureValidUrls:
+    """Fixture-driven: every `valid_urls` case in the canonical roku-deeplink test_fixtures.json."""
+
+    @pytest.mark.parametrize(
+        "case",
+        FIXTURES["valid_urls"],
+        ids=[case["url"] for case in FIXTURES["valid_urls"]],
+    )
+    def test_valid_url_extraction(self, case: dict[str, Any]) -> None:
+        result = convert_url_to_ecp_command(case["url"])
+        assert result == ExtractionResult(**case["expected"])
+
+
+class TestFixtureInvalidUrls:
+    """Fixture-driven: every `invalid_urls` case in the canonical roku-deeplink test_fixtures.json."""
+
+    @pytest.mark.parametrize(
+        "case",
+        FIXTURES["invalid_urls"],
+        ids=[case["url"] for case in FIXTURES["invalid_urls"]],
+    )
+    def test_invalid_url_returns_none(self, case: dict[str, Any]) -> None:
+        assert convert_url_to_ecp_command(case["url"]) is None
+
+
+class TestFixturePlaybackCommands:
+    """Fixture-driven: `playback_commands` cases for channels cueso implements.
+
+    Cases whose channel_id isn't in cueso's catalog (Emby, 44191) are skipped --
+    cueso does not support Emby.
+    """
+
+    @pytest.mark.parametrize(
+        "case",
+        _PLAYBACK_FIXTURES,
+        ids=[c["input"]["channel_name"] for c in _PLAYBACK_FIXTURES],
+    )
+    def test_playback_command(self, case: dict[str, Any]) -> None:
+        extraction = ExtractionResult(**case["input"])
+        result = build_playback_command(extraction)
+        expected = case["expected"]
+
+        assert result.type == expected["type"]
+        assert len(result.actions) == len(expected["actions"])
+
+        for actual, expected_action in zip(result.actions, expected["actions"], strict=True):
+            assert actual.type == expected_action["type"]
+            if expected_action["type"] == "launch":
+                assert actual.channel_id == expected_action["channel_id"]
+                assert actual.params == expected_action["params"]
+            elif expected_action["type"] == "wait":
+                assert actual.milliseconds == expected_action["milliseconds"]
+            elif expected_action["type"] == "keypress":
+                assert actual.key == expected_action["key"]
+                assert actual.count == expected_action["count"]
