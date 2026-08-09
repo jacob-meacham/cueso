@@ -63,7 +63,11 @@ class EmbyClient:
         except httpx.RequestError as e:
             logger.error("Emby request failed: %s", e)
             raise EmbyError(f"Emby request failed: {e}") from e
-        data: dict[str, Any] = response.json()
+        try:
+            data: dict[str, Any] = response.json()
+        except ValueError as e:
+            logger.error("Emby returned invalid JSON: %s", e)
+            raise EmbyError(f"Emby returned invalid JSON: {e}") from e
         return data
 
     async def search(self, title: str, season: int | None = None, episode: int | None = None) -> list[EmbyItem]:
@@ -107,7 +111,8 @@ class EmbyClient:
 
     @staticmethod
     def _parse_item(raw: dict[str, Any]) -> EmbyItem:
-        ticks = raw.get("UserData", {}).get("PlaybackPositionTicks", 0)
+        user_data: dict[str, Any] = raw.get("UserData") or {}
+        ticks = user_data.get("PlaybackPositionTicks", 0)
         return EmbyItem(
             item_id=str(raw.get("Id", "")),
             name=str(raw.get("Name", "")),

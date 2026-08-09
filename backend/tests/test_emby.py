@@ -1,5 +1,6 @@
 """Tests for the Emby media server client."""
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -139,3 +140,24 @@ class TestSearch:
 
         with pytest.raises(EmbyError):
             await client.search("Heat")
+
+    @pytest.mark.asyncio
+    async def test_non_json_response_raises_emby_error(self, client: EmbyClient, http_client: AsyncMock) -> None:
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.side_effect = json.JSONDecodeError("Expecting value", "<html>", 0)
+        http_client.get.return_value = resp
+
+        with pytest.raises(EmbyError):
+            await client.search("Heat")
+
+    @pytest.mark.asyncio
+    async def test_userdata_null_means_no_resume(self, client: EmbyClient, http_client: AsyncMock) -> None:
+        http_client.get.return_value = _response(
+            {"Items": [{"Id": "m1", "Name": "Heat", "Type": "Movie", "UserData": None}]}
+        )
+
+        items = await client.search("Heat")
+
+        assert len(items) == 1
+        assert items[0].resume_position_ticks is None
