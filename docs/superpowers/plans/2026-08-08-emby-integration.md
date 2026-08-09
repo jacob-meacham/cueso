@@ -16,7 +16,7 @@
 - Emby's Roku channel ID is `44191` (roku-deeplink spec); launch params for Emby are `Command=PlayNow&ItemIds={id}` with optional `&StartPositionTicks={ticks}` — **param order matters** for the spec fixtures, and dict insertion order is what serializes.
 - Emby channels are launch-only: no wait, no keypress — ever.
 - Never edit `speclib.toml` / `speclib.lock` by hand; only via `speclib sync --record`.
-- The provenance headers in `app/core/streaming.py` and `app/core/search_and_play.py` stay at `roku-deeplink v1.4.0` (the spec version is unchanged by this work).
+- The provenance headers in `app/core/streaming.py` and `app/core/search_and_play.py` stay at `roku-deeplink v1.5.0` (the spec version is unchanged by this work; the repo synced to v1.5.0 on 2026-08-08 — do not touch the v1.5.0 verification-probe or query-shape code).
 - Work on the `emby-integration` branch. Commit after each task, message trailer:
   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
 
@@ -640,13 +640,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: Task 3's `launch_on_roku` (launch-only when `post_launch_key` is None, Emby params, `resume_position_ticks`).
-- Produces: all 8 playback fixtures run; `--fixture-status pass` becomes truthful (Task 7 records it).
+- Produces: all 8 materialized playback fixtures run, Emby included (Task 7 records the sync; status stays `skip` because YouTube fixtures are excluded at materialization).
 
 - [ ] **Step 1: Update the fixture test**
 
 In `backend/tests/test_roku_deeplink_fixtures.py`:
 
-1. Module docstring: replace the final paragraph (the one beginning "Emby (channel_id 44191) is excluded:") with:
+1. Module docstring: the final paragraph covers both Emby and YouTube. Replace only its Emby sentences (everything up to and including "matching in the first place).") with the text below; keep the YouTube sentences that follow unchanged:
 
 ```
 Emby (channel_id 44191) is launch-only and addressed by descriptor, not URL:
@@ -747,7 +747,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `EmbyClient`, `EmbyError`, `EmbyItem` (Task 2); `ContentMatch` fields (Task 3).
 - Produces (Task 6 relies on this):
-  - `search_content(title: str, brave_client: BraveSearchClient | None, season=None, episode=None, episode_title=None, media_type=None, services=None, emby_client: EmbyClient | None = None) -> ContentSearchResult` — note `brave_client` may now be None (streaming search skipped with failure message "Brave Search is not configured.").
+  - `search_content(title: str, brave_client: BraveSearchClient | None, season=None, episode=None, episode_title=None, media_type=None, services=None, http_client: httpx.AsyncClient | None = None, emby_client: EmbyClient | None = None) -> ContentSearchResult` — `brave_client` may now be None (streaming search skipped with failure message "Brave Search is not configured."); `http_client` is the existing v1.5.0 probe param, unchanged.
   - Emby matches come first in `result.matches`, with `service_name="emby"`, `channel_id=44191`, `post_launch_key=None`.
   - Emby failure (EmbyError) degrades to streaming-only; both-empty → `success=False`.
 
@@ -866,7 +866,7 @@ Add near the other module constants:
 _EMBY_MEDIA_TYPES = {"Movie": "movie", "Series": "series", "Episode": "episode"}
 ```
 
-Replace the body of `search_content` with a concurrent two-source search. The existing Brave/URL-matching logic moves verbatim into `_search_streaming` (same log lines, same messages); the new `_search_emby` wraps the Emby client:
+Replace the body of `search_content` with a concurrent two-source search. The existing Brave/URL-matching logic — **including the v1.5.0 verification-probe block** (the `_verify_match` call and its "Rejected … candidate" logging; `_verify_match` itself stays module-level and unchanged) — moves verbatim into `_search_streaming` (same log lines, same messages). The new `_search_emby` wraps the Emby client. Note `search_content` keeps its v1.5.0 `http_client` probe parameter; `emby_client` goes after it:
 
 ```python
 async def search_content(
@@ -877,12 +877,19 @@ async def search_content(
     episode_title: str | None = None,
     media_type: str | None = None,
     services: list[StreamingService] | None = None,
+    http_client: httpx.AsyncClient | None = None,
     emby_client: EmbyClient | None = None,
 ) -> ContentSearchResult:
     """Search the local Emby library and streaming services concurrently.
 
     Emby matches come first (the user's own server). An Emby failure degrades
     to streaming-only results; a missing Brave client degrades to Emby-only.
+
+    Args:
+        http_client: Client for verification probes (spec §11); omitting it
+            skips probes (fail open).
+        emby_client: Client for the local Emby library; omitting it skips
+            Emby search.
 
     Returns:
         ContentSearchResult with all matches across sources.
@@ -891,7 +898,7 @@ async def search_content(
 
     emby_matches, streaming = await asyncio.gather(
         _search_emby(emby_client, title, season, episode, media_type),
-        _search_streaming(brave_client, base_query, media_type, services),
+        _search_streaming(brave_client, base_query, media_type, services, http_client),
     )
     streaming_matches, streaming_failure = streaming
 
@@ -951,6 +958,7 @@ async def _search_streaming(
     base_query: str,
     media_type: str | None,
     services: list[StreamingService] | None,
+    http_client: httpx.AsyncClient | None,
 ) -> tuple[list[ContentMatch], str | None]:
     """Search the web for streaming-service URLs.
 
@@ -980,6 +988,16 @@ async def _search_streaming(
         matched = match_url_full(result.url, services=target_services)
         if matched:
             if matched.service.name in seen_services:
+                continue
+            # Spec §11: a rejected candidate must not satisfy or block its
+            # service — keep scanning so a later legit URL can claim it.
+            if not await _verify_match(matched, result.url, http_client):
+                logger.info(
+                    "Rejected %s candidate %s (verification probe 404): %s",
+                    matched.service.name,
+                    matched.content_id,
+                    result.url,
+                )
                 continue
             seen_services.add(matched.service.name)
             matches.append(
@@ -1221,6 +1239,7 @@ In the `launch_on_roku` schema, update `post_launch_key`'s description to `"Key 
             episode=arguments.get("episode"),
             episode_title=arguments.get("episode_title"),
             media_type=arguments.get("media_type"),
+            http_client=self.http_client,
             emby_client=self.emby_client,
         )
         return result.to_tool_result()
@@ -1328,7 +1347,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: everything above.
-- Produces: a recorded sync whose `fixture_status` is `pass` and whose selections include Emby.
+- Produces: a recorded sync whose selections include Emby. `fixture_status` stays `skip`: the 2 Emby fixtures now run, but YouTube (spec v1.4.1+, not selected in this repo) still has fixtures excluded at materialization, and speclib's rule is "excluded any → skip, never pass".
 
 - [ ] **Step 1: Run every gate**
 
@@ -1343,13 +1362,13 @@ Expected: all clean, full suite green. Fix anything that fails before proceeding
 
 - [ ] **Step 2: Re-record the speclib sync**
 
-All fixtures — including both Emby playback cases — now run, so `pass` is truthful:
+Both Emby playback cases now run, but YouTube's fixtures remain excluded at materialization (channel not selected), so the honest status is still `skip`:
 
 ```bash
 speclib sync --record roku-deeplink \
   --test-command "uv run pytest tests/test_roku_deeplink_fixtures.py" \
-  --fixture-status pass \
-  --selections "language: python; tracks: live streaming.py (match_url_full) + search_and_play.py (launch_on_roku); channels: Netflix, Disney+, HBO Max, Prime Video, Hulu, Apple TV+, Emby (self-hosted, launch-only)"
+  --fixture-status skip \
+  --selections "language: python; tracks: live streaming.py (match_url_full) + search_and_play.py (launch_on_roku, search_content verification per spec §11); channels: Netflix, Disney+, HBO Max, Prime Video, Hulu, Apple TV+, Emby (self-hosted, launch-only); excludes: YouTube (not selected)"
 ```
 
 - [ ] **Step 3: Verify and commit**

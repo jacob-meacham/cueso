@@ -9,8 +9,12 @@ Make the user's self-hosted Emby server a first-class playback target in cueso:
 searchable through the normal `find_content` flow and playable on Roku via the
 Emby channel, including resume ("continue watching"). This also brings the
 roku-deeplink spec's Emby channel (44191) into the tracked speclib surface, so
-its two playback fixtures run against live code and `fixture_status` can become
-`pass`.
+its two playback fixtures run against live code.
+
+*(Amended after the 2026-08-08 v1.5.0 sync: `fixture_status` stays `skip` even
+with Emby included, because spec v1.4.1+ ships YouTube fixtures and this repo
+does not select YouTube. The Emby scope of this design is unaffected — v1.5.0
+left the Emby channel unchanged and generalized launch-only semantics.)*
 
 ## Background
 
@@ -161,12 +165,12 @@ After implementation passes all gates, re-record:
 ```
 speclib sync --record roku-deeplink \
   --test-command "uv run pytest tests/test_roku_deeplink_fixtures.py" \
-  --fixture-status pass \
-  --selections "language: python; tracks: live streaming.py (match_url_full) + search_and_play.py (launch_on_roku); channels: Netflix, Disney+, HBO Max, Prime Video, Hulu, Apple TV+, Emby (self-hosted, launch-only)"
+  --fixture-status skip \
+  --selections "language: python; tracks: live streaming.py (match_url_full) + search_and_play.py (launch_on_roku, search_content verification per spec §11); channels: Netflix, Disney+, HBO Max, Prime Video, Hulu, Apple TV+, Emby (self-hosted, launch-only); excludes: YouTube (not selected)"
 ```
 
-`--fixture-status pass` is only valid because every fixture, including both
-Emby cases, will then run. The CLI owns `speclib.toml`/`speclib.lock`.
+Status stays `skip` (see the amendment in Goal: YouTube fixtures are excluded
+at materialization). The CLI owns `speclib.toml`/`speclib.lock`.
 
 ## Out of Scope
 
