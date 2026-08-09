@@ -1,6 +1,6 @@
 """Fixture-driven conformance tests for cueso's LIVE Roku deep-link path.
 
-These validate the roku-deeplink spec (v1.3.0) against the code that actually
+These validate the roku-deeplink spec (v1.4.0) against the code that actually
 runs in production -- NOT a standalone module. The live path is:
 
     api/chat.py -> llm/tool_executor.py -> search_and_play.py -> streaming.py
@@ -16,7 +16,7 @@ Spec Function 2 ``build_playback_command(descriptor) -> action_sequence``
     sequence matches the fixture's action list.
 
 Fixtures come from the spec's canonical ``test_fixtures.json`` (materialized by
-speclib at v1.3.0 into ``tests/roku_deeplink_fixtures.json``).
+speclib at v1.4.0 into ``tests/roku_deeplink_fixtures.json``).
 
 Name adapter: cueso identifies services by internal names (e.g. ``apple_tv_plus``)
 while the spec identifies channels by ``channel_id`` / ``channel_name``.

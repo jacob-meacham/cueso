@@ -2,6 +2,8 @@
 
 search_content() — Brave Search → URL match → returns ALL matches across services.
 launch_on_roku()  — Execute action sequence: launch → wait 2000ms → keypress.
+
+Generated from spec library roku-deeplink v1.4.0 (speclib).
 """
 
 import asyncio

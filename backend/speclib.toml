@@ -1,7 +1,7 @@
 [project]
 [dependencies]
 [dependencies.roku-deeplink]
-source = '/code/jacob/roku-deeplink-spec'
+source = 'git@github.com:jacob-meacham/roku-deeplink-spec.git'
 version = '*'
 path = 'app/core'
 language = 'python'

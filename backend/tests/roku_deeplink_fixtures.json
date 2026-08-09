@@ -31,6 +31,46 @@
       }
     },
     {
+      "url": "https://www.netflix.com/us/title/80179766",
+      "expected": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "80179766",
+        "media_type": "series",
+        "post_launch_key": "Play"
+      }
+    },
+    {
+      "url": "https://netflix.com/en-gb/watch/81444554",
+      "expected": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "81444554",
+        "media_type": "movie",
+        "post_launch_key": "Play"
+      }
+    },
+    {
+      "url": "https://www.netflix.com/watch/81444554?next=/title/80179766",
+      "expected": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "81444554",
+        "media_type": "movie",
+        "post_launch_key": "Play"
+      }
+    },
+    {
+      "url": "https://www.netflix.com/title/80179766?from=/watch/81444554",
+      "expected": {
+        "channel_id": "12",
+        "channel_name": "Netflix",
+        "content_id": "80179766",
+        "media_type": "series",
+        "post_launch_key": "Play"
+      }
+    },
+    {
       "url": "https://www.disneyplus.com/play/f63db666-b097-4c61-99c1-b778de2d4ae1",
       "expected": {
         "channel_id": "291097",
@@ -165,6 +205,10 @@
     {
       "url": "https://netflix.com/browse",
       "description": "Netflix browse page, not a content URL"
+    },
+    {
+      "url": "https://www.netflix.com/us/browse",
+      "description": "Netflix locale-prefixed browse page, not a content URL"
     },
     {
       "url": "https://netflix.com/",

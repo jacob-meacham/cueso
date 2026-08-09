@@ -17,7 +17,8 @@ from app.core.streaming import (
 
 
 class TestMatchUrlNetflix:
-    r"""Netflix URL tests per roku-deeplink-spec pattern: netflix\.com/(?:watch|title)/(\d+)"""
+    r"""Netflix URL tests per roku-deeplink-spec pattern:
+    netflix\.com/(?:\w{2}(?:-\w{2})?/)?(?:watch|title)/(\d+)"""
 
     def test_title_url(self) -> None:
         result = match_url("https://www.netflix.com/title/81231974")
@@ -40,10 +41,13 @@ class TestMatchUrlNetflix:
         assert service is NETFLIX
         assert content_id == "12345"
 
-    def test_regional_url_not_supported(self) -> None:
-        """Regional URLs like /gb/title/ are not supported per roku-deeplink-spec."""
+    def test_regional_url(self) -> None:
+        """Regional URLs like /gb/title/ are supported as of roku-deeplink-spec v1.4.0."""
         result = match_url("https://www.netflix.com/gb/title/81231974")
-        assert result is None
+        assert result is not None
+        service, content_id = result
+        assert service is NETFLIX
+        assert content_id == "81231974"
 
 
 class TestMatchUrlAmazon:

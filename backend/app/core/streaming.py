@@ -1,4 +1,7 @@
-"""Streaming service registry for content ID extraction and Roku deep linking."""
+"""Streaming service registry for content ID extraction and Roku deep linking.
+
+Generated from spec library roku-deeplink v1.4.0 (speclib).
+"""
 
 import logging
 import re
@@ -17,11 +20,16 @@ class StreamingService:
     url_patterns: tuple[re.Pattern[str], ...] = field(repr=False)
     default_media_type: str = "movie"
     post_launch_key: str = "Select"  # Key to press after launch (Play for Netflix)
-    media_type_from_url: bool = False  # Whether to detect media_type from URL path
+    media_type_from_url: bool = False  # Whether to detect media_type from the matched URL text
 
-    def get_media_type(self, url: str) -> str:
-        """Determine media type from URL or return default."""
-        if self.media_type_from_url and "/title/" in url:
+    def get_media_type(self, matched_text: str) -> str:
+        """Determine media type from the regex-matched text or return default.
+
+        Must be given the matched text (regex group 0), not the full URL: the
+        other path segment can appear elsewhere in the URL (e.g. a query
+        parameter), but exactly one of /watch/ or /title/ appears in a match.
+        """
+        if self.media_type_from_url and "/title/" in matched_text:
             return "series"
         return self.default_media_type
 
@@ -33,8 +41,9 @@ NETFLIX = StreamingService(
     roku_channel_id=12,
     domains=("netflix.com",),
     url_patterns=(
-        # Per roku-deeplink-spec: netflix\.com/(?:watch|title)/(\d+)
-        re.compile(r"netflix\.com/(?:watch|title)/(\d+)"),
+        # Per roku-deeplink-spec: netflix\.com/(?:\w{2}(?:-\w{2})?/)?(?:watch|title)/(\d+)
+        # Optional locale prefix (/us/, /en-gb/) common in search engine results
+        re.compile(r"netflix\.com/(?:\w{2}(?:-\w{2})?/)?(?:watch|title)/(\d+)"),
     ),
     post_launch_key="Play",
     media_type_from_url=True,  # /watch/ = movie, /title/ = series
@@ -177,7 +186,7 @@ def match_url_full(url: str, services: list[StreamingService] | None = None) -> 
                 return UrlMatchResult(
                     service=service,
                     content_id=m.group(1),
-                    media_type=service.get_media_type(url),
+                    media_type=service.get_media_type(m.group(0)),
                     post_launch_key=service.post_launch_key,
                 )
     return None
