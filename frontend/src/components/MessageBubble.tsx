@@ -1,5 +1,6 @@
 import type { ChatMessage, ContentMatch } from "../types";
 import ContentCards from "./ContentCards";
+import Markdown from "./Markdown";
 
 type Props = {
   message: ChatMessage;
@@ -19,15 +20,18 @@ export default function MessageBubble({ message, onLaunch, launching }: Props) {
             : "bg-slate-800 text-slate-200"
         }`}
       >
-        {/* Message text */}
-        {message.content && (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">
-            {message.content}
-            {message.isStreaming && (
-              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-slate-400" />
-            )}
-          </p>
-        )}
+        {/* Message text: user text is verbatim, assistant text is markdown */}
+        {message.content &&
+          (isUser ? (
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+          ) : (
+            <div>
+              <Markdown>{message.content}</Markdown>
+              {message.isStreaming && (
+                <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-slate-400" />
+              )}
+            </div>
+          ))}
 
         {/* Tool running indicator */}
         {message.isToolRunning && (

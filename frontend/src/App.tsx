@@ -260,6 +260,9 @@ export default function App() {
           content_id: match.content_id,
           media_type: match.media_type,
         });
+        if (match.resume_position_ticks != null) {
+          params.set("resume_position_ticks", String(match.resume_position_ticks));
+        }
         const res = await fetch(`${API_URL}/roku/launch?${params}`, {
           method: "POST",
         });

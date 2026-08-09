@@ -5,6 +5,10 @@ export type ContentMatch = {
   source_url: string;
   title: string;
   media_type: string;
+  poster_url?: string | null;
+  season?: number | null;
+  episode?: number | null;
+  resume_position_ticks?: number | null;
 };
 
 export type ChatMessage = {

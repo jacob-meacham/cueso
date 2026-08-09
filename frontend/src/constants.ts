@@ -11,13 +11,15 @@ export const SERVICE_COLORS: Record<string, string> = {
   max: "#002BE7",
   apple_tv_plus: "#A2AAAD",
   amazon_prime: "#00A8E1",
+  emby: "#52B54B",
 };
 
 export const SERVICE_DISPLAY_NAMES: Record<string, string> = {
   netflix: "Netflix",
   hulu: "Hulu",
   disney_plus: "Disney+",
-  max: "Max",
+  max: "HBO Max",
   apple_tv_plus: "Apple TV+",
   amazon_prime: "Prime Video",
+  emby: "My Library",
 };
