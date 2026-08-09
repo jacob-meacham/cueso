@@ -279,6 +279,15 @@ class TestOpenRouterStreamGuard:
         assert ids == ["toolu_1", "toolu_2"]
         assert len(set(ids)) == len(ids), f"duplicate tool_call ids: {ids}"
 
+        # Pin per-index name/argument mapping too — a regression that corrupts
+        # this mapping while preserving id uniqueness and count would otherwise
+        # slip past this test undetected.
+        first, second = result.tool_calls
+        assert first.name == "get_weather"
+        assert first.arguments == {"city": "Seattle"}
+        assert second.name == "get_weather"
+        assert second.arguments == {"city": "Boston"}
+
 
 # ===========================================================================
 # get_llm_provider dependency
