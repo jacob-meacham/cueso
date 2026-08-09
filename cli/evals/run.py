@@ -41,6 +41,13 @@ EVALS: list[dict[str, str]] = [
         "prompt": "Put on Severance season 2",
         "description": "Recent show on Apple TV+",
     },
+    {
+        "prompt": (
+            "What is the gritty medical show set in Pittsburgh? There is an episode "
+            "I think where a new doctor drops a scalpel on a doctor's foot"
+        ),
+        "description": "Identification question — must still search, not just answer",
+    },
 ]
 
 DEFAULT_URL = "ws://localhost:8483/ws/chat"
