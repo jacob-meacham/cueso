@@ -94,6 +94,14 @@ class BraveConfig(BaseModel):
     api_key: SecretStr | None = None
 
 
+class EmbyConfig(BaseModel):
+    """Emby self-hosted media server settings."""
+
+    server_url: str = ""
+    api_key: SecretStr | None = None
+    user_id: str = ""
+
+
 # --- Top-level settings ---
 
 
@@ -108,6 +116,7 @@ class Settings(BaseSettings):
     roku: RokuConfig = Field(default_factory=RokuConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     brave: BraveConfig = Field(default_factory=BraveConfig)
+    emby: EmbyConfig = Field(default_factory=EmbyConfig)
     streaming: list[str] = Field(
         default_factory=lambda: [
             "netflix",

@@ -98,3 +98,19 @@ class TestLogLevelNormalization:
 
         c = LoggingConfig(level="warn")  # type: ignore[arg-type]
         assert c.level == "warning"
+
+
+class TestEmbyConfig:
+    def test_defaults(self) -> None:
+        from app.core.config import EmbyConfig
+
+        config = EmbyConfig()
+        assert config.server_url == ""
+        assert config.api_key is None
+        assert config.user_id == ""
+
+    def test_settings_have_emby_section(self) -> None:
+        from app.core.config import EmbyConfig, Settings
+
+        settings = Settings()
+        assert isinstance(settings.emby, EmbyConfig)
