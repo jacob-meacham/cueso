@@ -66,9 +66,9 @@ async def get_llm_provider() -> LLMProvider:
 
         return AnthropicProvider(api_key=api_key, model=settings.llm.model)
     elif settings.llm.provider == "openai":
-        from ..core.llm.providers.openai import OpenAIProvider
+        from ..core.llm.providers.openrouter import OpenRouterProvider
 
-        return OpenAIProvider(api_key=api_key, model=settings.llm.model)
+        return OpenRouterProvider(api_key=api_key, model=settings.llm.model)
     else:
         raise ValueError(f"Unsupported LLM provider: {settings.llm.provider}")
 
