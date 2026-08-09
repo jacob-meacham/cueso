@@ -58,19 +58,15 @@ def get_http_client(conn: HTTPConnection) -> httpx.AsyncClient:
 async def get_llm_provider() -> LLMProvider:
     """Get the configured LLM provider."""
     if not settings.llm.api_key:
-        raise ValueError("LLM API key is required. Set llm.api_key in config.yml")
+        raise ValueError("LLM API key is required. Set llm.api_key in config.yml (an OpenRouter key)")
     api_key = settings.llm.api_key.get_secret_value()
 
-    if settings.llm.provider == "anthropic":
-        from ..core.llm.providers.anthropic import AnthropicProvider
-
-        return AnthropicProvider(api_key=api_key, model=settings.llm.model)
-    elif settings.llm.provider == "openai":
+    if settings.llm.provider == "openrouter":
         from ..core.llm.providers.openrouter import OpenRouterProvider
 
-        return OpenRouterProvider(api_key=api_key, model=settings.llm.model)
-    else:
-        raise ValueError(f"Unsupported LLM provider: {settings.llm.provider}")
+        return OpenRouterProvider(api_key=api_key, model=settings.llm.model, base_url=settings.llm.base_url)
+
+    raise ValueError(f"Unsupported LLM provider: {settings.llm.provider}")
 
 
 async def get_tool_executor(http_client: httpx.AsyncClient = Depends(get_http_client)) -> ToolExecutor:
