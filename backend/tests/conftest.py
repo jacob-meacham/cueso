@@ -24,3 +24,10 @@ def mock_emby_client() -> AsyncMock:
     client = AsyncMock(spec=EmbyClient)
     client.server_url = "http://emby.local:8096"
     return client
+
+
+@pytest.fixture
+def mock_tmdb_client() -> AsyncMock:
+    from app.core.tmdb import TMDBClient
+
+    return AsyncMock(spec=TMDBClient)

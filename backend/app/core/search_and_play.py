@@ -16,6 +16,7 @@ import httpx
 from .brave_search import BraveSearchClient, BraveSearchError
 from .emby import EMBY_CHANNEL_ID, EmbyClient, EmbyError
 from .streaming import StreamingService, UrlMatchResult, get_active_services, get_site_filters, match_url_full
+from .tmdb import TMDBClient
 
 logger = logging.getLogger("cueso.search_and_play")
 
@@ -23,6 +24,7 @@ logger = logging.getLogger("cueso.search_and_play")
 # distinction to browsers but may bot-wall default library UAs.
 VERIFY_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 VERIFY_TIMEOUT_SECONDS = 5.0
+ORACLE_TIMEOUT_SECONDS = 2.0
 
 _EMBY_MEDIA_TYPES = {"Movie": "movie", "Series": "series", "Episode": "episode"}
 
@@ -132,6 +134,7 @@ async def search_content(
     services: list[StreamingService] | None = None,
     http_client: httpx.AsyncClient | None = None,
     emby_client: EmbyClient | None = None,
+    tmdb_client: TMDBClient | None = None,
 ) -> ContentSearchResult:
     """Search the local Emby library and streaming services concurrently.
 
@@ -143,11 +146,20 @@ async def search_content(
             skips probes (fail open).
         emby_client: Client for the local Emby library; omitting it skips
             Emby search.
+        tmdb_client: Optional availability oracle; when given, matches whose
+            service TMDB says cannot stream the title are dropped (fail open
+            on any oracle failure).
 
     Returns:
         ContentSearchResult with all matches across sources.
     """
     base_query = build_search_query(title, season, episode, episode_title)
+
+    oracle_task: asyncio.Task[set[str] | None] | None = None
+    if tmdb_client is not None:
+        oracle_task = asyncio.create_task(
+            tmdb_client.get_streamable_services(title, tv_only=season is not None or episode is not None)
+        )
 
     emby_matches, streaming = await asyncio.gather(
         _search_emby(emby_client, title, season, episode, media_type),
@@ -155,18 +167,39 @@ async def search_content(
     )
     streaming_matches, streaming_failure = streaming
 
-    matches = emby_matches + streaming_matches
+    streamable: set[str] | None = None
+    if oracle_task is not None:
+        try:
+            streamable = await asyncio.wait_for(oracle_task, timeout=ORACLE_TIMEOUT_SECONDS)
+        except Exception as e:
+            logger.warning("TMDB availability oracle failed (%s); returning matches unfiltered", e)
+
+    # Emby is the user's own library, never a TMDB-tracked service — only
+    # streaming matches are ever eligible for filtering.
+    filter_notes: list[str] = []
+    kept_streaming: list[ContentMatch] = streaming_matches
+    if streamable is not None:
+        kept_streaming = []
+        for match in streaming_matches:
+            if match.service_name in streamable:
+                kept_streaming.append(match)
+            else:
+                filter_notes.append(f"filtered {match.service_name} (not streamable per TMDB)")
+                logger.info("Filtered %s match %s: not streamable per TMDB", match.service_name, match.content_id)
+
+    matches = emby_matches + kept_streaming
     if not matches:
-        message = streaming_failure or f"No content found for: {base_query}"
+        if filter_notes:
+            message = "Found streaming URLs but none are playable: " + "; ".join(filter_notes)
+        else:
+            message = streaming_failure or f"No content found for: {base_query}"
         return ContentSearchResult(success=False, message=message, query=base_query, matches=[])
 
     service_names = [m.service_name for m in matches]
-    return ContentSearchResult(
-        success=True,
-        message=f"Found content on {len(matches)} service(s): {', '.join(service_names)}",
-        query=base_query,
-        matches=matches,
-    )
+    message = f"Found content on {len(matches)} service(s): {', '.join(service_names)}"
+    if filter_notes:
+        message += " — " + "; ".join(filter_notes)
+    return ContentSearchResult(success=True, message=message, query=base_query, matches=matches)
 
 
 async def _search_emby(

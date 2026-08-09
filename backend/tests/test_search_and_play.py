@@ -633,3 +633,164 @@ class TestSearchContentEmby:
 
         assert result.success is False
         assert result.matches == []
+
+
+class TestSearchContentAvailabilityFilter:
+    """TMDB oracle filtering: drop only on affirmative absence, fail open otherwise."""
+
+    NETFLIX_RESULT = SearchResult(
+        title="Watch Bye Bye Birdie | Netflix",
+        url="https://www.netflix.com/title/342088",
+        description="",
+    )
+    HULU_RESULT = SearchResult(
+        title="The Bear | Hulu",
+        url="https://www.hulu.com/series/the-bear-565d8976-9e52-4f30-a6f5-a47e7fe1abd4",
+        description="",
+    )
+
+    @pytest.mark.asyncio
+    async def test_drops_service_absent_from_oracle(
+        self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
+    ) -> None:
+        mock_brave_client.search.return_value = [self.NETFLIX_RESULT, self.HULU_RESULT]
+        mock_tmdb_client.get_streamable_services.return_value = {"hulu"}
+
+        result = await search_content(
+            title="The Bear",
+            brave_client=mock_brave_client,
+            services=[NETFLIX, HULU],
+            tmdb_client=mock_tmdb_client,
+        )
+
+        assert result.success is True
+        assert [m.service_name for m in result.matches] == ["hulu"]
+        assert "filtered netflix (not streamable per TMDB)" in result.message
+
+    @pytest.mark.asyncio
+    async def test_oracle_none_keeps_everything(
+        self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
+    ) -> None:
+        mock_brave_client.search.return_value = [self.NETFLIX_RESULT, self.HULU_RESULT]
+        mock_tmdb_client.get_streamable_services.return_value = None
+
+        result = await search_content(
+            title="The Bear",
+            brave_client=mock_brave_client,
+            services=[NETFLIX, HULU],
+            tmdb_client=mock_tmdb_client,
+        )
+
+        assert result.success is True
+        assert len(result.matches) == 2
+        assert "filtered" not in result.message
+
+    @pytest.mark.asyncio
+    async def test_oracle_exception_fails_open(self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [self.NETFLIX_RESULT]
+        mock_tmdb_client.get_streamable_services.side_effect = RuntimeError("boom")
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[NETFLIX],
+            tmdb_client=mock_tmdb_client,
+        )
+
+        assert result.success is True
+        assert len(result.matches) == 1
+
+    @pytest.mark.asyncio
+    async def test_oracle_timeout_fails_open(self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock) -> None:
+        import asyncio as _asyncio
+
+        async def _slow(title: str, tv_only: bool = False) -> set[str]:
+            await _asyncio.sleep(30)
+            return set()
+
+        mock_brave_client.search.return_value = [self.NETFLIX_RESULT]
+        mock_tmdb_client.get_streamable_services.side_effect = _slow
+
+        with patch("app.core.search_and_play.ORACLE_TIMEOUT_SECONDS", 0.01):
+            result = await search_content(
+                title="Bye Bye Birdie",
+                brave_client=mock_brave_client,
+                services=[NETFLIX],
+                tmdb_client=mock_tmdb_client,
+            )
+
+        assert result.success is True
+        assert len(result.matches) == 1
+
+    @pytest.mark.asyncio
+    async def test_all_matches_filtered_fails_with_explanation(
+        self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
+    ) -> None:
+        mock_brave_client.search.return_value = [self.NETFLIX_RESULT]
+        mock_tmdb_client.get_streamable_services.return_value = set()
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[NETFLIX],
+            tmdb_client=mock_tmdb_client,
+        )
+
+        assert result.success is False
+        assert result.matches == []
+        assert "filtered netflix (not streamable per TMDB)" in result.message
+
+    @pytest.mark.asyncio
+    async def test_tv_hint_from_season(self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [self.HULU_RESULT]
+        mock_tmdb_client.get_streamable_services.return_value = {"hulu"}
+
+        await search_content(
+            title="The Bear",
+            season=3,
+            brave_client=mock_brave_client,
+            services=[HULU],
+            tmdb_client=mock_tmdb_client,
+        )
+
+        mock_tmdb_client.get_streamable_services.assert_awaited_once_with("The Bear", tv_only=True)
+
+    @pytest.mark.asyncio
+    async def test_no_tmdb_client_unchanged(self, mock_brave_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [self.NETFLIX_RESULT]
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[NETFLIX],
+        )
+
+        assert result.success is True
+        assert len(result.matches) == 1
+
+    @pytest.mark.asyncio
+    async def test_emby_match_exempt_from_filtering(
+        self,
+        mock_brave_client: AsyncMock,
+        mock_emby_client: AsyncMock,
+        mock_tmdb_client: AsyncMock,
+    ) -> None:
+        """Emby is the user's own library; the oracle never says "emby", so an
+        unexempted filter would wrongly drop every Emby match."""
+        mock_emby_client.search.return_value = [EmbyItem(item_id="m1", name="Heat", item_type="Movie")]
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Heat | Netflix", url="https://www.netflix.com/watch/81444554", description="")
+        ]
+        mock_tmdb_client.get_streamable_services.return_value = {"hulu"}
+
+        result = await search_content(
+            title="Heat",
+            brave_client=mock_brave_client,
+            services=[NETFLIX, HULU],
+            emby_client=mock_emby_client,
+            tmdb_client=mock_tmdb_client,
+        )
+
+        assert result.success is True
+        assert [m.service_name for m in result.matches] == ["emby"]
+        assert "filtered netflix (not streamable per TMDB)" in result.message
