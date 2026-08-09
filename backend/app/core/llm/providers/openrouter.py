@@ -1,4 +1,4 @@
-"""OpenAI LLM provider implementation."""
+"""OpenRouter LLM provider implementation (OpenAI-compatible gateway)."""
 
 import json
 from collections.abc import AsyncGenerator
@@ -9,18 +9,24 @@ import openai
 from ..provider import LLMProvider
 from ..types import Message, MessageRole, SessionConfig, StreamResult, Tool, ToolCall
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-class OpenAIProvider(LLMProvider):
-    """OpenAI GPT provider implementation."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4"):
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+class OpenRouterProvider(LLMProvider):
+    """OpenRouter provider — routes to any model behind OpenRouter's OpenAI-compatible API."""
+
+    def __init__(self, api_key: str, model: str, base_url: str = OPENROUTER_BASE_URL):
+        self.client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers={"X-Title": "Cueso"},
+        )
         self.model = model
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
-        """Convert our Message format to OpenAI's format.
+        """Convert our Message format to OpenAI-compatible format.
 
-        OpenAI expects tool results as role=tool messages with tool_call_id,
+        OpenAI-compatible expects tool results as role=tool messages with tool_call_id,
         and assistant messages with tool_calls must include the tool_calls array.
         """
         converted: list[dict[str, Any]] = []
@@ -63,7 +69,7 @@ class OpenAIProvider(LLMProvider):
         return converted
 
     def _convert_tools(self, tools: list[Tool]) -> list[dict[str, Any]]:
-        """Convert our Tool format to OpenAI's function calling format."""
+        """Convert our Tool format to OpenAI-compatible function calling format."""
         return [
             {
                 "type": "function",
@@ -92,7 +98,7 @@ class OpenAIProvider(LLMProvider):
         messages: list[Message],
         config: SessionConfig,
     ) -> tuple[str, list[ToolCall]]:
-        """Generate a non-streaming response from OpenAI."""
+        """Generate a non-streaming response from OpenRouter."""
         converted_messages = self._convert_messages(messages)
         converted_tools = self._convert_tools(config.tools) if config.tools else None
 
@@ -116,7 +122,7 @@ class OpenAIProvider(LLMProvider):
         config: SessionConfig,
         result: StreamResult,
     ) -> AsyncGenerator[dict[str, Any]]:
-        """Generate a streaming response from OpenAI.
+        """Generate a streaming response from OpenRouter.
 
         Yields event dicts for the client. Populates `result` with the
         accumulated content and tool_calls by the time the generator is done.
@@ -145,6 +151,8 @@ class OpenAIProvider(LLMProvider):
         _tool_names: dict[int, str] = {}
 
         async for chunk in stream:
+            if not chunk.choices:
+                continue
             delta = chunk.choices[0].delta
 
             # Text content
