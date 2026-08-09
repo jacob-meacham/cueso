@@ -462,6 +462,9 @@ class TestLaunchOnRokuEmby:
         args, kwargs = mock_http_client.post.call_args
         assert args[0] == "http://192.168.1.100:8060/launch/44191"
         assert kwargs["params"] == {"Command": "PlayNow", "ItemIds": "3f9a1c"}
+        # dict == is order-insensitive; assert insertion order explicitly since
+        # it determines serialized query-string order (spec-fixture order).
+        assert list(kwargs["params"].keys()) == ["Command", "ItemIds"]
         mock_sleep.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -484,6 +487,9 @@ class TestLaunchOnRokuEmby:
             "ItemIds": "3f9a1c",
             "StartPositionTicks": "12000000000",
         }
+        # dict == is order-insensitive; assert insertion order explicitly since
+        # it determines serialized query-string order (spec-fixture order).
+        assert list(kwargs["params"].keys()) == ["Command", "ItemIds", "StartPositionTicks"]
 
     @pytest.mark.asyncio
     async def test_emby_ignores_post_launch_key(self, mock_http_client: AsyncMock) -> None:
