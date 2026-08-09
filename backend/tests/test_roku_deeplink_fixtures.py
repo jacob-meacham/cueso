@@ -29,9 +29,10 @@ spec's identity) can validate cueso's live output. The ``channel_id`` assertion 
 anchored to live code (``service.roku_channel_id``); the adapter's value must
 agree with it, so the mapping cannot silently drift.
 
-Emby (channel_id 44191) is excluded: cueso has no self-hosted Emby server, so its
-2 launch-only playback fixtures are skipped (and Emby is never produced by URL
-matching in the first place). YouTube (channel_id 837, added in spec v1.4.1) is
+Emby (channel_id 44191) is launch-only and addressed by descriptor, not URL:
+its 2 playback fixtures run against ``launch_on_roku`` (single launch POST,
+PlayNow params, optional StartPositionTicks, no wait/keypress); it is never
+produced by URL matching. YouTube (channel_id 837, added in spec v1.4.1) is
 not a selected channel in this repo: its valid-URL and playback fixtures are
 excluded at materialization; its invalid-URL fixtures remain, since they are
 no-match for cueso regardless.
@@ -71,9 +72,6 @@ SERVICE_TO_SPEC_CHANNEL: dict[str, tuple[str, str]] = {
     "max": ("61322", "HBO Max"),
     "apple_tv_plus": ("551012", "Apple TV+"),
 }
-
-# cueso has no Emby integration; its playback fixtures are excluded.
-EMBY_CHANNEL_ID = "44191"
 
 ROKU_BASE_URL = "http://192.168.1.100:8060"
 
@@ -116,19 +114,19 @@ class TestSpecFunction1InvalidUrls:
         assert match_url_full(case["url"], services=ALL_SERVICES) is None
 
 
-_PLAYBACK_CASES = [c for c in FIXTURES["playback_commands"] if c["input"]["channel_id"] != EMBY_CHANNEL_ID]
-_EXCLUDED_PLAYBACK = [c for c in FIXTURES["playback_commands"] if c["input"]["channel_id"] == EMBY_CHANNEL_ID]
+_PLAYBACK_CASES: list[dict[str, Any]] = FIXTURES["playback_commands"]
 
 
 class TestSpecFunction2PlaybackCommands:
-    """Function 2 (live: search_and_play.launch_on_roku) emits the launch ->
-    wait 2000ms -> keypress sequence for every non-Emby playback fixture."""
+    """Function 2 (live: search_and_play.launch_on_roku) emits the spec's action
+    sequence for every playback fixture: launch -> wait 2000ms -> keypress for
+    URL channels, a single launch for Emby (launch-only)."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "case",
         _PLAYBACK_CASES,
-        ids=[c["input"]["channel_name"] for c in _PLAYBACK_CASES],
+        ids=[f"{c['input']['channel_name']}-{i}" for i, c in enumerate(_PLAYBACK_CASES)],
     )
     async def test_playback_sequence(self, case: dict[str, Any], mock_http_client: AsyncMock) -> None:
         descriptor = case["input"]
@@ -144,36 +142,31 @@ class TestSpecFunction2PlaybackCommands:
                 content_id=descriptor["content_id"],
                 roku_base_url=ROKU_BASE_URL,
                 http_client=mock_http_client,
-                media_type=descriptor["media_type"],
-                post_launch_key=descriptor["post_launch_key"],
+                media_type=descriptor.get("media_type", "movie"),
+                post_launch_key=descriptor.get("post_launch_key"),
+                resume_position_ticks=descriptor.get("resume_position_ticks"),
             )
 
         assert result.success is True
         assert case["expected"]["type"] == "action_sequence"
-
-        # Non-Emby fixtures are always launch -> wait -> keypress.
-        assert [a["type"] for a in expected_actions] == ["launch", "wait", "keypress"]
-        launch_action, wait_action, keypress_action = expected_actions
-
         calls = mock_http_client.post.call_args_list
-        assert len(calls) == 2  # launch POST + keypress POST
 
-        # Action 1: launch/{channel_id}?contentId=...&mediaType=...
+        # Action 1 is always the launch, with exact spec params (order matters).
+        launch_action = expected_actions[0]
+        assert launch_action["type"] == "launch"
         assert f"/launch/{launch_action['channel_id']}" in calls[0].args[0]
         params = calls[0].kwargs["params"]
-        serialized = f"contentId={params['contentId']}&mediaType={params['mediaType']}"
+        serialized = "&".join(f"{k}={v}" for k, v in params.items())
         assert serialized == launch_action["params"]
 
-        # Action 2: wait 2000ms (spec milliseconds -> live seconds)
-        mock_sleep.assert_awaited_once_with(wait_action["milliseconds"] / 1000)
-
-        # Action 3: keypress/{key}, pressed exactly once (count == 1)
-        assert f"/keypress/{keypress_action['key']}" in calls[1].args[0]
-        assert keypress_action["count"] == 1
-
-
-def test_emby_playback_fixtures_are_excluded() -> None:
-    """Document the exclusion: cueso has no Emby server, so its 2 launch-only
-    playback fixtures are intentionally not validated against live code."""
-    assert len(_EXCLUDED_PLAYBACK) == 2
-    assert all(c["input"]["channel_id"] == EMBY_CHANNEL_ID for c in _EXCLUDED_PLAYBACK)
+        if len(expected_actions) == 1:
+            # Launch-only channel (Emby): no wait, no keypress.
+            assert len(calls) == 1
+            mock_sleep.assert_not_awaited()
+        else:
+            assert [a["type"] for a in expected_actions] == ["launch", "wait", "keypress"]
+            _, wait_action, keypress_action = expected_actions
+            assert len(calls) == 2
+            mock_sleep.assert_awaited_once_with(wait_action["milliseconds"] / 1000)
+            assert f"/keypress/{keypress_action['key']}" in calls[1].args[0]
+            assert keypress_action["count"] == 1
