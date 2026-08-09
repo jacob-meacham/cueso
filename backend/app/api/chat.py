@@ -11,6 +11,7 @@ from starlette.requests import HTTPConnection
 
 from ..core.brave_search import BraveSearchClient
 from ..core.config import settings
+from ..core.emby import EmbyClient
 from ..core.llm import ROKU_ECP_PORT, LLMProvider, SessionConfig, SessionStore, ToolExecutor
 from ..core.llm.tool_executor import RokuECPToolExecutor
 
@@ -25,11 +26,15 @@ SYSTEM_PROMPT = (
     "When a user asks to play content:\n"
     "1. If you're unsure about the exact title, season, or episode, use web_search "
     "to research it first.\n"
-    "2. Once you know the exact content, call find_content to search streaming services.\n"
-    "3. After find_content returns, present the available streaming services to the user "
-    "and let them choose where to play. Do NOT automatically call launch_on_roku.\n"
+    "2. Once you know the exact content, call find_content to search the user's "
+    "personal Emby library and streaming services.\n"
+    "3. After find_content returns, present the available options to the user and "
+    "let them choose where to play. Emby is the user's own server — list it first "
+    "when it has the content. Do NOT automatically call launch_on_roku.\n"
     "4. When the user tells you which service to use, call launch_on_roku with that "
-    "service's channel_id, content_id, and media_type.\n\n"
+    "service's channel_id, content_id, and media_type. For Emby matches, omit "
+    "post_launch_key and pass resume_position_ticks when the match has one, so "
+    "playback continues where the user left off.\n\n"
     "For general questions or when you need information, use web_search.\n"
     "For direct Roku operations, use search_roku or get_roku_status."
 )
@@ -88,7 +93,15 @@ async def get_tool_executor(http_client: httpx.AsyncClient = Depends(get_http_cl
                 api_key=settings.brave.api_key.get_secret_value(),
                 http_client=http_client,
             )
-        return RokuECPToolExecutor(settings.roku.ip, http_client, brave_client)
+        emby_client = None
+        if settings.emby.server_url and settings.emby.api_key:
+            emby_client = EmbyClient(
+                server_url=settings.emby.server_url,
+                api_key=settings.emby.api_key.get_secret_value(),
+                user_id=settings.emby.user_id,
+                http_client=http_client,
+            )
+        return RokuECPToolExecutor(settings.roku.ip, http_client, brave_client, emby_client)
     else:
         raise ValueError(f"Unsupported tool executor: {settings.tools.executor}")
 

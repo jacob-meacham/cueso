@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from ..brave_search import BraveSearchError
+from ..emby import EMBY_CHANNEL_ID, EmbyClient
 from ..search_and_play import launch_on_roku, search_content
 from .types import ROKU_ECP_PORT, Tool
 
@@ -91,11 +92,13 @@ TOOL_DEFINITIONS: list[Tool] = [
     Tool(
         name="find_content",
         description=(
-            "Search streaming services (Netflix, Hulu, Disney+, Max, Apple TV+, Amazon Prime) "
-            "for content and return all available matches with channel IDs, content IDs, media_type, "
-            "and post_launch_key. Use this when you know the exact content to find. The results "
-            "include every streaming service where the content is available. After calling this, "
-            "use launch_on_roku with the returned values to play content."
+            "Search the user's personal Emby library and streaming services "
+            "(Netflix, Hulu, Disney+, Max, Apple TV+, Amazon Prime) for content and "
+            "return all available matches with channel IDs, content IDs, media_type, "
+            "post_launch_key, and resume_position_ticks (Emby only, when partially "
+            "watched). Emby matches are listed first. Use this when you know the exact "
+            "content to find. After calling this, use launch_on_roku with the returned "
+            "values to play content."
         ),
         input_schema={
             "type": "object",
@@ -128,10 +131,12 @@ TOOL_DEFINITIONS: list[Tool] = [
     Tool(
         name="launch_on_roku",
         description=(
-            "Launch content on the Roku device. Call this after find_content with one of the "
-            "returned matches. Provide the channel_id, content_id, media_type, and post_launch_key "
-            "from the find_content results. This executes an action sequence: launch the app, "
-            "wait 2 seconds, then press the appropriate key to start playback."
+            "Launch content on the Roku device. Call this after find_content with one of "
+            "the returned matches. Provide the channel_id, content_id, and media_type from "
+            "the find_content results. For streaming services also pass post_launch_key; "
+            "the launch waits 2 seconds and presses that key. Emby (channel 44191) is "
+            "launch-only and starts playback directly; pass resume_position_ticks from "
+            "the match to resume where the user left off."
         ),
         input_schema={
             "type": "object",
@@ -151,9 +156,13 @@ TOOL_DEFINITIONS: list[Tool] = [
                 },
                 "post_launch_key": {
                     "type": "string",
-                    "description": "Key to press after launch (from find_content results)",
+                    "description": "Key to press after launch (streaming services only; ignored for Emby)",
                     "enum": ["Play", "Select"],
                     "default": "Select",
+                },
+                "resume_position_ticks": {
+                    "type": "integer",
+                    "description": "Emby resume position in ticks (from find_content); omit to play from the start",
                 },
             },
             "required": ["channel_id", "content_id"],
@@ -170,11 +179,13 @@ class RokuECPToolExecutor(ToolExecutor):
         roku_ip: str,
         http_client: Any,
         brave_client: BraveSearchClient | None = None,
+        emby_client: EmbyClient | None = None,
     ) -> None:
         self.roku_ip = roku_ip
         self.http_client = http_client
         self.base_url = f"http://{roku_ip}:{ROKU_ECP_PORT}"
         self.brave_client = brave_client
+        self.emby_client = emby_client
         self._handlers: dict[str, Callable[..., Awaitable[str]]] = {
             "search_roku": self._search_roku,
             "get_roku_status": self._get_roku_status,
@@ -230,9 +241,11 @@ class RokuECPToolExecutor(ToolExecutor):
             return f"Search error: {e}"
 
     async def _find_content(self, arguments: dict[str, Any]) -> str:
-        """Search streaming services for content, returning all matches."""
-        if self.brave_client is None:
-            return json.dumps({"success": False, "message": "Brave Search is not configured.", "matches": []})
+        """Search the Emby library and streaming services for content."""
+        if self.brave_client is None and self.emby_client is None:
+            return json.dumps(
+                {"success": False, "message": "No search backends configured (Brave Search or Emby).", "matches": []}
+            )
 
         result = await search_content(
             title=arguments.get("title", ""),
@@ -242,6 +255,7 @@ class RokuECPToolExecutor(ToolExecutor):
             episode_title=arguments.get("episode_title"),
             media_type=arguments.get("media_type"),
             http_client=self.http_client,
+            emby_client=self.emby_client,
         )
         return result.to_tool_result()
 
@@ -250,17 +264,26 @@ class RokuECPToolExecutor(ToolExecutor):
         channel_id = arguments.get("channel_id")
         content_id = arguments.get("content_id")
         media_type = arguments.get("media_type", "movie")
-        post_launch_key = arguments.get("post_launch_key", "Select")
 
         if not channel_id or not content_id:
             return json.dumps({"success": False, "message": "channel_id and content_id are required."})
 
+        channel = int(channel_id)
+        # Emby is launch-only: never press a key, whatever the model passed.
+        if channel == EMBY_CHANNEL_ID:
+            post_launch_key: str | None = None
+        else:
+            post_launch_key = arguments.get("post_launch_key") or "Select"
+
+        resume_ticks = arguments.get("resume_position_ticks")
+
         result = await launch_on_roku(
-            channel_id=int(channel_id),
+            channel_id=channel,
             content_id=str(content_id),
             roku_base_url=self.base_url,
             http_client=self.http_client,
             media_type=media_type,
             post_launch_key=post_launch_key,
+            resume_position_ticks=int(resume_ticks) if resume_ticks is not None else None,
         )
         return json.dumps({"success": result.success, "message": result.message})

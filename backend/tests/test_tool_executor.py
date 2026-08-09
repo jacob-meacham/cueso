@@ -1,10 +1,12 @@
 """Tests for the tool executor system."""
 
-from unittest.mock import AsyncMock, MagicMock
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.core.brave_search import BraveSearchClient, BraveSearchError, SearchResult
+from app.core.emby import EmbyClient, EmbyItem
 from app.core.llm.tool_executor import MCPToolExecutor, RokuECPToolExecutor, ToolExecutor
 from app.core.llm.types import ToolCall
 
@@ -236,7 +238,7 @@ async def test_find_content_tool_success() -> None:
 
 @pytest.mark.asyncio
 async def test_find_content_tool_no_brave() -> None:
-    """Test find_content returns error when brave not configured."""
+    """Test find_content returns error when no search backends are configured."""
     import json
 
     mock_http_client = MagicMock()
@@ -247,7 +249,7 @@ async def test_find_content_tool_no_brave() -> None:
 
     parsed = json.loads(result)
     assert parsed["success"] is False
-    assert "not configured" in parsed["message"]
+    assert "No search backends configured" in parsed["message"]
 
 
 # --- launch_on_roku tool tests ---
@@ -287,3 +289,97 @@ async def test_launch_on_roku_tool_missing_params() -> None:
     parsed = json.loads(result)
     assert parsed["success"] is False
     assert "required" in parsed["message"]
+
+
+# --- Emby tool wiring tests ---
+
+
+@pytest.fixture
+def mock_emby_client() -> AsyncMock:
+    client = AsyncMock(spec=EmbyClient)
+    client.server_url = "http://emby.local:8096"
+    return client
+
+
+@pytest.mark.asyncio
+async def test_launch_tool_emby_is_launch_only(mock_emby_client: AsyncMock) -> None:
+    """Channel 44191 never gets a keypress, even if the model passes post_launch_key."""
+    mock_http_client = AsyncMock()
+    ok = MagicMock()
+    ok.status_code = 200
+    mock_http_client.post.return_value = ok
+
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, emby_client=mock_emby_client)
+    result = await executor.execute_tool(
+        _tc(
+            "launch_on_roku",
+            {"channel_id": 44191, "content_id": "3f9a1c", "post_launch_key": "Select"},
+        )
+    )
+
+    assert '"success": true' in result
+    assert mock_http_client.post.call_count == 1
+    _, kwargs = mock_http_client.post.call_args
+    assert kwargs["params"] == {"Command": "PlayNow", "ItemIds": "3f9a1c"}
+
+
+@pytest.mark.asyncio
+async def test_launch_tool_emby_resume_passthrough(mock_emby_client: AsyncMock) -> None:
+    mock_http_client = AsyncMock()
+    ok = MagicMock()
+    ok.status_code = 200
+    mock_http_client.post.return_value = ok
+
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, emby_client=mock_emby_client)
+    await executor.execute_tool(
+        _tc(
+            "launch_on_roku",
+            {"channel_id": 44191, "content_id": "3f9a1c", "resume_position_ticks": 12000000000},
+        )
+    )
+
+    _, kwargs = mock_http_client.post.call_args
+    assert kwargs["params"]["StartPositionTicks"] == "12000000000"
+
+
+@pytest.mark.asyncio
+async def test_launch_tool_streaming_defaults_select(mock_emby_client: AsyncMock) -> None:
+    """Non-Emby launches keep the Select default when the model omits the key."""
+    mock_http_client = AsyncMock()
+    ok = MagicMock()
+    ok.status_code = 200
+    mock_http_client.post.return_value = ok
+
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, emby_client=mock_emby_client)
+    with patch("app.core.search_and_play.asyncio.sleep", new_callable=AsyncMock):
+        await executor.execute_tool(_tc("launch_on_roku", {"channel_id": 2285, "content_id": "abc"}))
+
+    assert mock_http_client.post.call_count == 2
+    assert "/keypress/Select" in mock_http_client.post.call_args_list[1].args[0]
+
+
+@pytest.mark.asyncio
+async def test_find_content_uses_emby(mock_emby_client: AsyncMock) -> None:
+    """find_content works with Emby alone (no Brave configured)."""
+    mock_http_client = AsyncMock()
+    mock_emby_client.search.return_value = [EmbyItem(item_id="m1", name="Heat", item_type="Movie")]
+
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, brave_client=None, emby_client=mock_emby_client)
+    result = await executor.execute_tool(_tc("find_content", {"title": "Heat"}))
+
+    payload = json.loads(result)
+    assert payload["success"] is True
+    assert payload["matches"][0]["service_name"] == "emby"
+    assert payload["matches"][0]["channel_id"] == 44191
+    assert payload["matches"][0]["post_launch_key"] is None
+
+
+@pytest.mark.asyncio
+async def test_find_content_no_backends() -> None:
+    mock_http_client = AsyncMock()
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, brave_client=None, emby_client=None)
+
+    result = await executor.execute_tool(_tc("find_content", {"title": "Heat"}))
+
+    payload = json.loads(result)
+    assert payload["success"] is False
