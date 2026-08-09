@@ -5,15 +5,40 @@
 **Context:** Task 4 of the OpenRouter consolidation (see
 `docs/superpowers/specs/2026-08-08-openrouter-consolidation-design.md` and
 `docs/superpowers/plans/2026-08-08-openrouter-consolidation.md`). Tasks 1–3
-made OpenRouter the sole LLM gateway; this is the live end-to-end validation
-run — the full eval suite through OpenRouter once with each model.
+made OpenRouter the sole LLM gateway; task 4 was the live end-to-end
+validation run — the full eval suite through OpenRouter once with each
+model, recorded below under "Pre-fix run". Task 5 root-caused and fixed the
+bug that run surfaced; see "Post-fix targeted rerun" and "Status" below.
 
-Both runs used the same backend build (worktree HEAD at the time of the run),
-the same `backend/config.yml` except for `llm.model`, and the same eval suite
-(`cli/evals/run.py`, 6 prompts), run exactly once per model against a freshly
-started dev server. No production code changed between runs.
+## Status: root cause fixed
 
-## Results
+Claude's two failures in the pre-fix run below were **not a model-quality
+gap** — they were caused by a bug in our own `OpenRouterProvider.generate_stream`
+(`backend/app/core/llm/providers/openrouter.py`): OpenRouter's Claude route
+can emit `finish_reason` on more than one chunk for the same turn, and the
+finalization block re-appended the accumulated tool calls on each such
+chunk without clearing its accumulator state, producing duplicate
+(non-unique) `tool_use` ids. Resending that history for a second LLM
+round-trip is what Anthropic's backend validation rejected with the `400:
+tool_use ids must be unique` error seen below.
+
+Fixed in commit `ae4fd2c` ("fix(llm): finalize streamed tool calls exactly
+once to keep tool_use ids unique"), with a regression test added/hardened in
+`ae4fd2c` and `a9326aa`. Full root-cause evidence (live diagnostic chunk
+log, failing/passing test output, gate results) is in
+`.superpowers/sdd/2026-08-08-openrouter-consolidation/task-5-report.md`.
+
+## Pre-fix run
+
+Both runs below used the same backend build (worktree HEAD at the time of
+the run, pre-fix), the same `backend/config.yml` except for `llm.model`, and
+the same eval suite (`cli/evals/run.py`, 6 prompts), run exactly once per
+model against a freshly started dev server. No production code changed
+between runs. This section is kept as the original historical record of the
+task 4 run; see "Post-fix targeted rerun" below for what changed after the
+fix.
+
+### Results
 
 | # | Eval | Claude (`anthropic/claude-sonnet-4.5`) | GLM (`z-ai/glm-5.2:nitro`) |
 |---|------|:---:|:---:|
@@ -40,7 +65,7 @@ Per-eval latency (user message received → `final`/error event, from server log
 GLM 5.2 Nitro was faster on every eval, including the two that required a
 second LLM round-trip (web research → find_content).
 
-## Notable behavioral differences
+### Notable behavioral differences
 
 **Both models issued two parallel tool calls per turn on every eval**, with
 identical arguments (e.g. `find_content` called twice with the same query,
@@ -99,30 +124,70 @@ possible for those two).
 No malformed tool arguments, wrong tool selection, or Roku-launch failures
 were observed for either model on the evals that completed.
 
+*(Historical note: the "candidate follow-up bug" flagged above was
+root-caused and fixed in task 5 — see "Status: root cause fixed" at the top
+of this doc. The analysis in this "Pre-fix run" section is left unedited as
+the original record of what was observed at the time.)*
+
+## Post-fix targeted rerun
+
+After the fix (commit `ae4fd2c`, hardened by `a9326aa`), `backend/config.yml`
+was set back to `anthropic/claude-sonnet-4.5` and **only the two originally
+failed evals (1 and 5)** were rerun against a freshly started dev server, via
+`cd cli && uv run python -m evals 1 5 --url ws://localhost:8484/ws/chat`:
+
+| # | Eval | Claude, post-fix |
+|---|------|:---:|
+| 1 | Play that Rick and Morty episode with the snakes | PASS (2 iterations) |
+| 5 | Play the episode of Breaking Bad where they blow up the lab | PASS (2 iterations) |
+
+Both completed a second LLM round-trip (`web_search` → `find_content`) with
+no `tool_use ids must be unique` error — the exact failure mode from the
+pre-fix run is gone.
+
+**This is a targeted 2-eval rerun, not a full fresh 6-eval Claude pass.**
+Evals 2, 3, 4, and 6 were not rerun after the fix — they already passed in
+the pre-fix run and are unaffected by this bug (they never trigger a second
+round-trip), but a full fresh 6/6 confirmation for Claude post-fix has not
+been done. Combining the pre-fix full run's 4 unaffected passes with this
+targeted rerun's 2 passes gives Claude an effective 6/6 across the two runs
+combined — not the same evidentiary strength as a single fresh full-suite
+run, but sufficient to say the specific defect that caused both failures is
+resolved.
+
 ## Recommendation
 
-**Flip the default to `z-ai/glm-5.2:nitro` for now.** In this run, GLM passed
-100% of the suite and was faster on every eval, while Claude failed exactly
-the two evals that require a multi-step tool loop — the core "research an
-ambiguous request, then find it on a streaming service" use case this system
-is built around — due to what looks like a reproducible OpenRouter/Anthropic
-tool-call-id bug rather than a model-quality gap. Shipping Claude as the
-default in its current state means roughly a third of realistic multi-step
-requests are expected to error out.
+**Both models now pass all 6 evals through OpenRouter** (Claude: 4/6 in the
+original full run + 2/2 in the targeted post-fix rerun, combining to an
+effective 6/6; GLM: 6/6 in a single full run). The original recommendation
+to flip the default to GLM was made to route around a live bug, not because
+of a genuine model-quality gap — that bug is now fixed, so the choice is a
+real tradeoff rather than a reliability verdict:
 
-This recommendation is based on a single run per model (evals cost real
-money, so the suite was run once each per the task constraints) and should be
-revisited: if the duplicate-`tool_use`-id issue is root-caused and fixed
-(likely in `OpenRouterProvider.generate_stream`'s per-index id tracking, or
-possibly an upstream OpenRouter behavior worth reporting to them), Claude
-Sonnet 4.5 should be re-evaluated as the default — its output quality on the
-evals it did complete was on par with or more thorough than GLM's, and it's
-the model this system was designed around. Until then, GLM 5.2 Nitro is the
-more reliable choice for the multi-step tool-calling path.
+- **GLM 5.2 Nitro** was faster on every eval in the pre-fix run (~14s vs
+  ~22s wall clock for the full suite) and is very likely cheaper per call
+  (nitro routing + non-frontier pricing), with no observed quality issues on
+  the prompts tested.
+- **Claude Sonnet 4.5** was the system's prior default and the model this
+  system was originally designed around; its narration and research-eval
+  answers (e.g. correctly identifying "Rattlestar Ricklactica" S4E5 and
+  "Face Off" S4E13) were thorough and accurate once it could complete the
+  second round-trip.
+- Both models exhibited the same pre-existing, separate inefficiency
+  (duplicate parallel tool calls per turn) noted above — not a
+  differentiator between them.
 
-**Suggested follow-up (separate from this task, no code changed here):**
-investigate `_tool_ids` assignment in
-`backend/app/core/llm/providers/openrouter.py`'s `generate_stream` for the
-case of two parallel tool-call deltas in one Anthropic-backed response, and
-consider a defensive fix (e.g. de-duplicating/regenerating tool-call ids
-before they're echoed back in the next request) regardless of root cause.
+**Final call belongs to the user/product owner** — this is a
+speed-and-cost-vs-familiarity tradeoff between two models that both now work
+correctly through OpenRouter, not a bug-driven decision. If reverting to
+Claude as the default, note the confirmation above is a targeted 2-eval
+rerun; a fresh full 6-eval Claude run would give higher confidence before
+shipping that change.
+
+**Follow-up already completed (was "suggested" pre-fix, now done):** the
+`_tool_ids`/`_tool_arg_buffers`/`_tool_names` accumulator state in
+`OpenRouterProvider.generate_stream` is now cleared after each finalization,
+so a repeat `finish_reason` chunk is a no-op instead of re-appending
+already-finalized tool calls. See commit `ae4fd2c` and
+`.superpowers/sdd/2026-08-08-openrouter-consolidation/task-5-report.md` for
+full details.
