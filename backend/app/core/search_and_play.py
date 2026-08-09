@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 import httpx
 
 from .brave_search import BraveSearchClient, BraveSearchError
+from .emby import EMBY_CHANNEL_ID
 from .streaming import StreamingService, UrlMatchResult, get_active_services, get_site_filters, match_url_full
 
 logger = logging.getLogger("cueso.search_and_play")
@@ -34,7 +35,8 @@ class ContentMatch:
     source_url: str
     title: str
     media_type: str
-    post_launch_key: str = "Select"  # Key to press after launch (Play for Netflix)
+    post_launch_key: str | None = "Select"  # Key to press after launch; None = launch-only (Emby)
+    resume_position_ticks: int | None = None  # Emby resume position, when partially watched
 
 
 @dataclass
@@ -232,14 +234,16 @@ async def launch_on_roku(
     roku_base_url: str,
     http_client: httpx.AsyncClient,
     media_type: str = "movie",
-    post_launch_key: str = "Select",
+    post_launch_key: str | None = "Select",
+    resume_position_ticks: int | None = None,
 ) -> LaunchResult:
-    """Launch content on Roku via ECP using action sequence.
+    """Launch content on Roku via ECP using the roku-deeplink action sequence.
 
-    Executes the roku-deeplink-spec action sequence:
-    1. POST /launch/{channel_id}?contentId={id}&mediaType={type}
-    2. Wait 2000ms for app to load
-    3. POST /keypress/{key} (Play for Netflix, Select for others)
+    URL channels: POST /launch/{channel_id}?contentId={id}&mediaType={type},
+    wait 2000ms, POST /keypress/{key}.
+    Emby (channel 44191) is launch-only: POST /launch/44191?Command=PlayNow
+    &ItemIds={id}[&StartPositionTicks={ticks}] and nothing else. A None
+    post_launch_key makes any launch launch-only (spec Function 2 semantics).
 
     Args:
         channel_id: Roku channel ID (e.g. 12 for Netflix).
@@ -247,14 +251,22 @@ async def launch_on_roku(
         roku_base_url: Roku ECP base URL (e.g. "http://192.168.1.100:8060").
         http_client: Shared httpx client.
         media_type: Roku mediaType param (default "movie").
-        post_launch_key: Key to press after launch (default "Select").
+        post_launch_key: Key to press after launch (default "Select"); None means launch-only.
+        resume_position_ticks: Emby resume position, when partially watched.
 
     Returns:
         LaunchResult with success status.
     """
     # Step 1: Launch the channel with deep link params
     launch_url = f"{roku_base_url}/launch/{channel_id}"
-    params = {"contentId": content_id, "mediaType": media_type}
+    # Emby is launch-only per roku-deeplink spec, whatever the caller passed.
+    if channel_id == EMBY_CHANNEL_ID:
+        params: dict[str, str] = {"Command": "PlayNow", "ItemIds": content_id}
+        if resume_position_ticks is not None:
+            params["StartPositionTicks"] = str(resume_position_ticks)
+        post_launch_key = None
+    else:
+        params = {"contentId": content_id, "mediaType": media_type}
     logger.info("Launching Roku: POST %s params=%s", launch_url, params)
 
     try:
@@ -267,6 +279,13 @@ async def launch_on_roku(
             success=False,
             message=f"Roku launch returned status {response.status_code}.",
             status_code=response.status_code,
+        )
+
+    if post_launch_key is None:
+        return LaunchResult(
+            success=True,
+            message=f"Launched channel {channel_id} with content ID {content_id} (launch-only).",
+            status_code=200,
         )
 
     # Step 2: Wait 2000ms for app to load

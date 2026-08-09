@@ -1,12 +1,12 @@
 """Tests for the content search and Roku launch pipeline."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 from app.core.brave_search import BraveSearchError, SearchResult
-from app.core.search_and_play import build_search_query, launch_on_roku, search_content
+from app.core.search_and_play import ContentMatch, build_search_query, launch_on_roku, search_content
 from app.core.streaming import AMAZON_PRIME, HULU, NETFLIX
 
 ROKU_BASE_URL = "http://192.168.1.100:8060"
@@ -438,3 +438,116 @@ class TestLaunchOnRoku:
 
         assert result.success is False
         assert "keypress returned status 500" in result.message
+
+
+class TestLaunchOnRokuEmby:
+    """Emby (channel 44191) is launch-only per roku-deeplink spec."""
+
+    @pytest.mark.asyncio
+    async def test_emby_launch_only(self, mock_http_client: AsyncMock) -> None:
+        ok = MagicMock()
+        ok.status_code = 200
+        mock_http_client.post.return_value = ok
+
+        with patch("app.core.search_and_play.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await launch_on_roku(
+                channel_id=44191,
+                content_id="3f9a1c",
+                roku_base_url="http://192.168.1.100:8060",
+                http_client=mock_http_client,
+            )
+
+        assert result.success is True
+        assert mock_http_client.post.call_count == 1
+        args, kwargs = mock_http_client.post.call_args
+        assert args[0] == "http://192.168.1.100:8060/launch/44191"
+        assert kwargs["params"] == {"Command": "PlayNow", "ItemIds": "3f9a1c"}
+        mock_sleep.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_emby_resume_position(self, mock_http_client: AsyncMock) -> None:
+        ok = MagicMock()
+        ok.status_code = 200
+        mock_http_client.post.return_value = ok
+
+        await launch_on_roku(
+            channel_id=44191,
+            content_id="3f9a1c",
+            roku_base_url="http://192.168.1.100:8060",
+            http_client=mock_http_client,
+            resume_position_ticks=12000000000,
+        )
+
+        _, kwargs = mock_http_client.post.call_args
+        assert kwargs["params"] == {
+            "Command": "PlayNow",
+            "ItemIds": "3f9a1c",
+            "StartPositionTicks": "12000000000",
+        }
+
+    @pytest.mark.asyncio
+    async def test_emby_ignores_post_launch_key(self, mock_http_client: AsyncMock) -> None:
+        """Even if a caller passes a key, Emby never gets a keypress."""
+        ok = MagicMock()
+        ok.status_code = 200
+        mock_http_client.post.return_value = ok
+
+        await launch_on_roku(
+            channel_id=44191,
+            content_id="3f9a1c",
+            roku_base_url="http://192.168.1.100:8060",
+            http_client=mock_http_client,
+            post_launch_key="Select",
+        )
+
+        assert mock_http_client.post.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_none_key_is_launch_only_for_any_channel(self, mock_http_client: AsyncMock) -> None:
+        """Spec Function 2: a descriptor with no post_launch_key is launch-only."""
+        ok = MagicMock()
+        ok.status_code = 200
+        mock_http_client.post.return_value = ok
+
+        with patch("app.core.search_and_play.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await launch_on_roku(
+                channel_id=12,
+                content_id="81444554",
+                roku_base_url="http://192.168.1.100:8060",
+                http_client=mock_http_client,
+                post_launch_key=None,
+            )
+
+        assert result.success is True
+        assert mock_http_client.post.call_count == 1
+        _, kwargs = mock_http_client.post.call_args
+        assert kwargs["params"] == {"contentId": "81444554", "mediaType": "movie"}
+        mock_sleep.assert_not_awaited()
+
+
+class TestContentMatchFields:
+    def test_launch_only_match(self) -> None:
+        match = ContentMatch(
+            service_name="emby",
+            channel_id=44191,
+            content_id="3f9a1c",
+            source_url="http://emby.local:8096/web/index.html#!/item?id=3f9a1c",
+            title="Heat",
+            media_type="movie",
+            post_launch_key=None,
+            resume_position_ticks=12000000000,
+        )
+        assert match.post_launch_key is None
+        assert match.resume_position_ticks == 12000000000
+
+    def test_resume_defaults_to_none(self) -> None:
+        match = ContentMatch(
+            service_name="netflix",
+            channel_id=12,
+            content_id="81444554",
+            source_url="https://netflix.com/watch/81444554",
+            title="Heat",
+            media_type="movie",
+        )
+        assert match.post_launch_key == "Select"
+        assert match.resume_position_ticks is None
