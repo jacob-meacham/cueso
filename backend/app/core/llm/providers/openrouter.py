@@ -192,7 +192,11 @@ class OpenRouterProvider(LLMProvider):
                             },
                         }
 
-            # Message complete — finalize accumulated tool calls
+            # Message complete — finalize accumulated tool calls.
+            # OpenRouter's Claude route can emit finish_reason on more than one
+            # chunk for the same turn; clear the accumulation dicts after
+            # finalizing so a repeat finish_reason chunk doesn't re-append the
+            # same tool calls (which would produce duplicate, non-unique ids).
             if chunk.choices[0].finish_reason:
                 for idx in sorted(_tool_ids.keys()):
                     raw_json = _tool_arg_buffers.get(idx, "{}")
@@ -203,6 +207,9 @@ class OpenRouterProvider(LLMProvider):
                     current_tool_calls.append(
                         ToolCall(id=_tool_ids[idx], name=_tool_names.get(idx, ""), arguments=arguments)
                     )
+                _tool_ids.clear()
+                _tool_names.clear()
+                _tool_arg_buffers.clear()
 
                 yield {
                     "type": "message_complete",

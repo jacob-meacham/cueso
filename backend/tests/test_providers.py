@@ -186,6 +186,21 @@ def _choice(content: str | None, finish_reason: str | None) -> Any:
     )
 
 
+def _tool_call_delta(index: int, id: str | None = None, name: str | None = None, arguments: str | None = None) -> Any:
+    return SimpleNamespace(
+        index=index,
+        id=id,
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+def _choice_tool_calls(tool_calls: list[Any], finish_reason: str | None = None) -> Any:
+    return SimpleNamespace(
+        delta=SimpleNamespace(content=None, tool_calls=tool_calls),
+        finish_reason=finish_reason,
+    )
+
+
 class TestOpenRouterStreamGuard:
     @pytest.mark.asyncio
     async def test_empty_choices_chunk_skipped(self, openrouter_provider: OpenRouterProvider) -> None:
@@ -216,6 +231,53 @@ class TestOpenRouterStreamGuard:
 
         assert result.content == "hi"
         assert any(e["type"] == "message_complete" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_duplicate_finish_reason_chunks_finalize_tool_calls_once(
+        self, openrouter_provider: OpenRouterProvider
+    ) -> None:
+        """Reproduces the observed OpenRouter Claude-route pattern: finish_reason
+        is set on *two* separate chunks for the same turn (confirmed live against
+        anthropic/claude-sonnet-4.5 via OpenRouter). The finalization block must
+        not re-append the accumulated tool calls on the second occurrence, or the
+        resulting tool_calls list contains duplicate ids — which 400s when the
+        session loop resends history (`tool_use ids must be unique`).
+        """
+        chunks = [
+            _chunk([_choice_tool_calls([_tool_call_delta(0, id="toolu_1", name="get_weather", arguments="")])]),
+            _chunk([_choice_tool_calls([_tool_call_delta(0, arguments="")])]),
+            _chunk([_choice_tool_calls([_tool_call_delta(0, arguments='{"city": "Seattle')])]),
+            _chunk([_choice_tool_calls([_tool_call_delta(0, arguments='"}')])]),
+            _chunk([_choice_tool_calls([_tool_call_delta(1, id="toolu_2", name="get_weather", arguments="")])]),
+            _chunk([_choice_tool_calls([_tool_call_delta(1, arguments="")])]),
+            _chunk([_choice_tool_calls([_tool_call_delta(1, arguments='{"city": "Boston')])]),
+            _chunk([_choice_tool_calls([_tool_call_delta(1, arguments='"}')])]),
+            _chunk([_choice("", "tool_calls")]),
+            _chunk([_choice("", "tool_calls")]),
+        ]
+
+        async def fake_stream() -> Any:
+            for c in chunks:
+                yield c
+
+        result = StreamResult()
+        config = SessionConfig(system_prompt="", tools=[])
+        with patch.object(
+            openrouter_provider.client.chat.completions,
+            "create",
+            AsyncMock(return_value=fake_stream()),
+        ):
+            [
+                e
+                async for e in openrouter_provider.generate_stream(
+                    [Message(role=MessageRole.USER, content="weather please")], config, result
+                )
+            ]
+
+        assert len(result.tool_calls) == 2
+        ids = [tc.id for tc in result.tool_calls]
+        assert ids == ["toolu_1", "toolu_2"]
+        assert len(set(ids)) == len(ids), f"duplicate tool_call ids: {ids}"
 
 
 # ===========================================================================
