@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 import httpx
 
 from .brave_search import BraveSearchClient, BraveSearchError
-from .emby import EMBY_CHANNEL_ID
+from .emby import EMBY_CHANNEL_ID, EmbyClient, EmbyError
 from .streaming import StreamingService, UrlMatchResult, get_active_services, get_site_filters, match_url_full
 
 logger = logging.getLogger("cueso.search_and_play")
@@ -23,6 +23,8 @@ logger = logging.getLogger("cueso.search_and_play")
 # distinction to browsers but may bot-wall default library UAs.
 VERIFY_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 VERIFY_TIMEOUT_SECONDS = 5.0
+
+_EMBY_MEDIA_TYPES = {"Movie": "movie", "Series": "series", "Episode": "episode"}
 
 
 @dataclass
@@ -122,39 +124,103 @@ async def _verify_match(
 
 async def search_content(
     title: str,
-    brave_client: BraveSearchClient,
+    brave_client: BraveSearchClient | None,
     season: int | None = None,
     episode: int | None = None,
     episode_title: str | None = None,
     media_type: str | None = None,
     services: list[StreamingService] | None = None,
     http_client: httpx.AsyncClient | None = None,
+    emby_client: EmbyClient | None = None,
 ) -> ContentSearchResult:
-    """Search streaming services for content and return all matches.
+    """Search the local Emby library and streaming services concurrently.
 
-    Steps:
-        1. Build search query from structured fields and append site: filters.
-        2. Call Brave Search.
-        3. Iterate through ALL results, match URLs to streaming services,
-           verifying ambiguous matches (spec §4/§11) when a client is given.
-        4. Return every verified match (one per service, in priority order).
+    Emby matches come first (the user's own server). An Emby failure degrades
+    to streaming-only results; a missing Brave client degrades to Emby-only.
 
     Args:
-        title: Content title (e.g. "Rick and Morty").
-        brave_client: Configured BraveSearchClient instance.
-        season: Optional season number.
-        episode: Optional episode number.
-        episode_title: Optional episode title for better search.
-        media_type: Optional override for Roku mediaType param.
-        services: Optional subset of streaming services to search.
-        http_client: Client for verification probes; omitting it skips probes
-            (fail open).
+        http_client: Client for verification probes (spec §11); omitting it
+            skips probes (fail open).
+        emby_client: Client for the local Emby library; omitting it skips
+            Emby search.
 
     Returns:
-        ContentSearchResult with all matches across services.
+        ContentSearchResult with all matches across sources.
     """
-    target_services = services or get_active_services()
     base_query = build_search_query(title, season, episode, episode_title)
+
+    emby_matches, streaming = await asyncio.gather(
+        _search_emby(emby_client, title, season, episode, media_type),
+        _search_streaming(brave_client, base_query, media_type, services, http_client),
+    )
+    streaming_matches, streaming_failure = streaming
+
+    matches = emby_matches + streaming_matches
+    if not matches:
+        message = streaming_failure or f"No content found for: {base_query}"
+        return ContentSearchResult(success=False, message=message, query=base_query, matches=[])
+
+    service_names = [m.service_name for m in matches]
+    return ContentSearchResult(
+        success=True,
+        message=f"Found content on {len(matches)} service(s): {', '.join(service_names)}",
+        query=base_query,
+        matches=matches,
+    )
+
+
+async def _search_emby(
+    emby_client: EmbyClient | None,
+    title: str,
+    season: int | None,
+    episode: int | None,
+    media_type: str | None,
+) -> list[ContentMatch]:
+    """Search the local Emby library; failures degrade to no matches.
+
+    A dead local server must never break streaming search.
+    """
+    if emby_client is None:
+        return []
+    try:
+        items = await emby_client.search(title, season=season, episode=episode)
+    except EmbyError as e:
+        logger.warning("Emby search failed, continuing with streaming only: %s", e)
+        return []
+
+    matches: list[ContentMatch] = []
+    for item in items:
+        matches.append(
+            ContentMatch(
+                service_name="emby",
+                channel_id=EMBY_CHANNEL_ID,
+                content_id=item.item_id,
+                source_url=f"{emby_client.server_url}/web/index.html#!/item?id={item.item_id}",
+                title=item.name,
+                media_type=media_type or _EMBY_MEDIA_TYPES.get(item.item_type, "movie"),
+                post_launch_key=None,
+                resume_position_ticks=item.resume_position_ticks,
+            )
+        )
+        logger.info("Matched: service=emby content_id=%s", item.item_id)
+    return matches
+
+
+async def _search_streaming(
+    brave_client: BraveSearchClient | None,
+    base_query: str,
+    media_type: str | None,
+    services: list[StreamingService] | None,
+    http_client: httpx.AsyncClient | None,
+) -> tuple[list[ContentMatch], str | None]:
+    """Search the web for streaming-service URLs.
+
+    Returns (matches, failure_message); failure_message is None on success.
+    """
+    if brave_client is None:
+        return [], "Brave Search is not configured."
+
+    target_services = services or get_active_services()
     site_filter = get_site_filters(target_services)
     full_query = f"{base_query} {site_filter}"
 
@@ -162,15 +228,10 @@ async def search_content(
     try:
         results = await brave_client.search(full_query, count=10)
     except BraveSearchError as e:
-        return ContentSearchResult(success=False, message=f"Search failed: {e}", query=base_query, matches=[])
+        return [], f"Search failed: {e}"
 
     if not results:
-        return ContentSearchResult(
-            success=False,
-            message=f"No search results found for: {base_query}",
-            query=base_query,
-            matches=[],
-        )
+        return [], f"No search results found for: {base_query}"
 
     # Collect all matches, one per service (first URL wins for that service)
     matches: list[ContentMatch] = []
@@ -212,20 +273,9 @@ async def search_content(
 
     if not matches:
         urls = [r.url for r in results[:5]]
-        return ContentSearchResult(
-            success=False,
-            message=f"Found {len(results)} results but no streaming service URLs matched. Top URLs: {urls}",
-            query=base_query,
-            matches=[],
-        )
+        return [], f"Found {len(results)} results but no streaming service URLs matched. Top URLs: {urls}"
 
-    service_names = [m.service_name for m in matches]
-    return ContentSearchResult(
-        success=True,
-        message=f"Found content on {len(matches)} service(s): {', '.join(service_names)}",
-        query=base_query,
-        matches=matches,
-    )
+    return matches, None
 
 
 async def launch_on_roku(

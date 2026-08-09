@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from app.core.brave_search import BraveSearchError, SearchResult
+from app.core.emby import EmbyError, EmbyItem
 from app.core.search_and_play import ContentMatch, build_search_query, launch_on_roku, search_content
 from app.core.streaming import AMAZON_PRIME, HULU, NETFLIX
 
@@ -557,3 +558,78 @@ class TestContentMatchFields:
         )
         assert match.post_launch_key == "Select"
         assert match.resume_position_ticks is None
+
+
+class TestSearchContentEmby:
+    @pytest.mark.asyncio
+    async def test_emby_matches_come_first(self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock) -> None:
+        mock_emby_client.search.return_value = [
+            EmbyItem(item_id="m1", name="Heat", item_type="Movie", resume_position_ticks=42)
+        ]
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Heat | Netflix", url="https://www.netflix.com/watch/81444554", description="")
+        ]
+
+        result = await search_content("Heat", mock_brave_client, emby_client=mock_emby_client)
+
+        assert result.success is True
+        assert [m.service_name for m in result.matches] == ["emby", "netflix"]
+        emby = result.matches[0]
+        assert emby.channel_id == 44191
+        assert emby.content_id == "m1"
+        assert emby.title == "Heat"
+        assert emby.media_type == "movie"
+        assert emby.post_launch_key is None
+        assert emby.resume_position_ticks == 42
+        assert emby.source_url == "http://emby.local:8096/web/index.html#!/item?id=m1"
+
+    @pytest.mark.asyncio
+    async def test_series_media_type(self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock) -> None:
+        mock_emby_client.search.return_value = [EmbyItem(item_id="s1", name="Severance", item_type="Series")]
+        mock_brave_client.search.return_value = []
+
+        result = await search_content("Severance", mock_brave_client, emby_client=mock_emby_client)
+
+        assert result.matches[0].media_type == "series"
+
+    @pytest.mark.asyncio
+    async def test_emby_failure_degrades_to_streaming(
+        self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock
+    ) -> None:
+        mock_emby_client.search.side_effect = EmbyError("server down")
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Heat | Netflix", url="https://www.netflix.com/watch/81444554", description="")
+        ]
+
+        result = await search_content("Heat", mock_brave_client, emby_client=mock_emby_client)
+
+        assert result.success is True
+        assert [m.service_name for m in result.matches] == ["netflix"]
+
+    @pytest.mark.asyncio
+    async def test_emby_passes_season_episode(self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock) -> None:
+        mock_emby_client.search.return_value = []
+        mock_brave_client.search.return_value = []
+
+        await search_content("Severance", mock_brave_client, season=2, episode=3, emby_client=mock_emby_client)
+
+        mock_emby_client.search.assert_awaited_once_with("Severance", season=2, episode=3)
+
+    @pytest.mark.asyncio
+    async def test_emby_only_no_brave(self, mock_emby_client: AsyncMock) -> None:
+        mock_emby_client.search.return_value = [EmbyItem(item_id="m1", name="Heat", item_type="Movie")]
+
+        result = await search_content("Heat", None, emby_client=mock_emby_client)
+
+        assert result.success is True
+        assert [m.service_name for m in result.matches] == ["emby"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_found_anywhere(self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock) -> None:
+        mock_emby_client.search.return_value = []
+        mock_brave_client.search.return_value = []
+
+        result = await search_content("Nonexistent", mock_brave_client, emby_client=mock_emby_client)
+
+        assert result.success is False
+        assert result.matches == []
