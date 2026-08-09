@@ -95,3 +95,7 @@ and `roku.ip` in config matches. The Roku ECP API listens on port 8060 by defaul
 
 **Port already in use**: The backend defaults to port 8483. Change it in `config.yml` under
 `server.port` or via `SERVER__PORT=9000`.
+
+## Data Sources
+
+Streaming availability data powered by [TMDB](https://www.themoviedb.org) and [JustWatch](https://www.justwatch.com).

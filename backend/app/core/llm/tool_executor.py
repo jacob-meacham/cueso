@@ -14,6 +14,7 @@ from .types import ROKU_ECP_PORT, Tool
 
 if TYPE_CHECKING:
     from ..brave_search import BraveSearchClient
+    from ..tmdb import TMDBClient
     from .types import ToolCall
 
 
@@ -180,12 +181,14 @@ class RokuECPToolExecutor(ToolExecutor):
         http_client: Any,
         brave_client: BraveSearchClient | None = None,
         emby_client: EmbyClient | None = None,
+        tmdb_client: TMDBClient | None = None,
     ) -> None:
         self.roku_ip = roku_ip
         self.http_client = http_client
         self.base_url = f"http://{roku_ip}:{ROKU_ECP_PORT}"
         self.brave_client = brave_client
         self.emby_client = emby_client
+        self.tmdb_client = tmdb_client
         self._handlers: dict[str, Callable[..., Awaitable[str]]] = {
             "search_roku": self._search_roku,
             "get_roku_status": self._get_roku_status,
@@ -256,6 +259,7 @@ class RokuECPToolExecutor(ToolExecutor):
             media_type=arguments.get("media_type"),
             http_client=self.http_client,
             emby_client=self.emby_client,
+            tmdb_client=self.tmdb_client,
         )
         return result.to_tool_result()
 

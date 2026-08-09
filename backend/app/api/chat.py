@@ -14,6 +14,7 @@ from ..core.config import settings
 from ..core.emby import EmbyClient
 from ..core.llm import ROKU_ECP_PORT, LLMProvider, SessionConfig, SessionStore, ToolExecutor
 from ..core.llm.tool_executor import RokuECPToolExecutor
+from ..core.tmdb import TMDBClient
 
 logger = logging.getLogger("cueso.chat")
 
@@ -101,7 +102,14 @@ async def get_tool_executor(http_client: httpx.AsyncClient = Depends(get_http_cl
                 user_id=settings.emby.user_id,
                 http_client=http_client,
             )
-        return RokuECPToolExecutor(settings.roku.ip, http_client, brave_client, emby_client)
+        tmdb_client = None
+        if settings.tmdb.api_key:
+            tmdb_client = TMDBClient(
+                api_key=settings.tmdb.api_key.get_secret_value(),
+                region=settings.tmdb.region,
+                http_client=http_client,
+            )
+        return RokuECPToolExecutor(settings.roku.ip, http_client, brave_client, emby_client, tmdb_client)
     else:
         raise ValueError(f"Unsupported tool executor: {settings.tools.executor}")
 

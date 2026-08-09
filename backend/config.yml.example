@@ -35,6 +35,12 @@ mcp:
 brave:
   api_key: your_brave_api_key_here
 
+# Optional: TMDB availability filtering (free API key from themoviedb.org).
+# Drops search matches for services that cannot actually stream the title.
+tmdb:
+  api_key: your_tmdb_v3_api_key
+  region: US
+
 # Emby self-hosted media server (optional).
 # Leave server_url empty to disable Emby library search.
 # user_id: open the Emby dashboard -> Users -> select your user; the id is in

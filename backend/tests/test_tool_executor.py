@@ -383,3 +383,26 @@ async def test_find_content_no_backends() -> None:
 
     payload = json.loads(result)
     assert payload["success"] is False
+
+
+# --- TMDB tool wiring tests ---
+
+
+class TestFindContentTMDBWiring:
+    @pytest.mark.asyncio
+    async def test_find_content_passes_tmdb_client(
+        self, mock_http_client: AsyncMock, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
+    ) -> None:
+        from app.core.search_and_play import ContentSearchResult
+
+        executor = RokuECPToolExecutor(
+            "192.168.1.100", mock_http_client, mock_brave_client, tmdb_client=mock_tmdb_client
+        )
+        with patch(
+            "app.core.llm.tool_executor.search_content",
+            new_callable=AsyncMock,
+            return_value=ContentSearchResult(success=True, message="", query="q", matches=[]),
+        ) as mock_search:
+            await executor.execute_tool(_tc("find_content", {"title": "The Bear"}))
+
+        assert mock_search.call_args.kwargs["tmdb_client"] is mock_tmdb_client
