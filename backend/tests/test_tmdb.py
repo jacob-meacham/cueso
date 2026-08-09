@@ -197,10 +197,9 @@ class TestGetStreamableServices:
             "https://api.themoviedb.org/3/search/multi",
             params={"api_key": api_key, "query": "The Bear"},
         )
-        try:
+        with pytest.raises(httpx.HTTPStatusError) as excinfo:
             httpx.Response(401, request=request).raise_for_status()
-        except httpx.HTTPStatusError as caught:
-            error = caught
+        error = excinfo.value
         # Sanity check: the underlying exception really does leak the key,
         # which is exactly why get_streamable_services must not log str(e).
         assert api_key in str(error)
