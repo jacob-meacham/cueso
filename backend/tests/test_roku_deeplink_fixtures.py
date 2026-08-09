@@ -1,6 +1,6 @@
 """Fixture-driven conformance tests for cueso's LIVE Roku deep-link path.
 
-These validate the roku-deeplink spec (v1.4.0) against the code that actually
+These validate the roku-deeplink spec (v1.5.0) against the code that actually
 runs in production -- NOT a standalone module. The live path is:
 
     api/chat.py -> llm/tool_executor.py -> search_and_play.py -> streaming.py
@@ -16,7 +16,11 @@ Spec Function 2 ``build_playback_command(descriptor) -> action_sequence``
     sequence matches the fixture's action list.
 
 Fixtures come from the spec's canonical ``test_fixtures.json`` (materialized by
-speclib at v1.4.0 into ``tests/roku_deeplink_fixtures.json``).
+speclib at v1.5.0 into ``tests/roku_deeplink_fixtures.json``).
+
+The spec's Prime Video verification probe (§4) and web-search sourcing rules
+(§11) are live-HTTP concerns, not fixture-testable; they are covered by unit
+tests in ``test_search_and_play.py`` instead.
 
 Name adapter: cueso identifies services by internal names (e.g. ``apple_tv_plus``)
 while the spec identifies channels by ``channel_id`` / ``channel_name``.
@@ -27,7 +31,10 @@ agree with it, so the mapping cannot silently drift.
 
 Emby (channel_id 44191) is excluded: cueso has no self-hosted Emby server, so its
 2 launch-only playback fixtures are skipped (and Emby is never produced by URL
-matching in the first place).
+matching in the first place). YouTube (channel_id 837, added in spec v1.4.1) is
+not a selected channel in this repo: its valid-URL and playback fixtures are
+excluded at materialization; its invalid-URL fixtures remain, since they are
+no-match for cueso regardless.
 """
 
 import json

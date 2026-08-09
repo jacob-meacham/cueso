@@ -1,9 +1,9 @@
 """Content search and Roku launch pipeline.
 
-search_content() — Brave Search → URL match → returns ALL matches across services.
+search_content() — Brave Search → URL match → verify → returns ALL matches across services.
 launch_on_roku()  — Execute action sequence: launch → wait 2000ms → keypress.
 
-Generated from spec library roku-deeplink v1.4.0 (speclib).
+Generated from spec library roku-deeplink v1.5.0 (speclib).
 """
 
 import asyncio
@@ -14,9 +14,14 @@ from dataclasses import asdict, dataclass
 import httpx
 
 from .brave_search import BraveSearchClient, BraveSearchError
-from .streaming import StreamingService, get_active_services, get_site_filters, match_url_full
+from .streaming import StreamingService, UrlMatchResult, get_active_services, get_site_filters, match_url_full
 
 logger = logging.getLogger("cueso.search_and_play")
+
+# Browser-like UA for verification probes: Amazon serves the plain 200/404
+# distinction to browsers but may bot-wall default library UAs.
+VERIFY_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+VERIFY_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass
@@ -61,8 +66,12 @@ def build_search_query(
     episode: int | None = None,
     episode_title: str | None = None,
 ) -> str:
-    """Build a search query from structured content fields."""
-    parts = [title]
+    """Build a search query from structured content fields.
+
+    Per roku-deeplink-spec §11, the query leads with "watch": bare-title
+    queries rank retail and placeholder pages above streaming pages.
+    """
+    parts = ["watch", title]
     if season is not None:
         parts.append(f"Season {season}")
     if episode is not None:
@@ -70,6 +79,43 @@ def build_search_query(
     if episode_title:
         parts.append(episode_title)
     return " ".join(parts)
+
+
+async def _verify_match(
+    matched: UrlMatchResult,
+    source_url: str,
+    http_client: httpx.AsyncClient | None,
+) -> bool:
+    """Run the service's verification probe on a matched URL, if required.
+
+    Per roku-deeplink-spec §4 (Prime Video): GET the probe URL — 200 accepts,
+    404 rejects, anything else (including no client to probe with) fails open
+    so a transient error never blocks a legitimate launch.
+    """
+    service = matched.service
+    if not service.needs_verification(source_url):
+        return True
+    if http_client is None:
+        logger.debug("No HTTP client for verification probe; accepting %s unverified", matched.content_id)
+        return True
+
+    probe_url = service.verification_url(matched.content_id)
+    try:
+        response = await http_client.get(
+            probe_url,
+            headers={"User-Agent": VERIFY_USER_AGENT},
+            follow_redirects=True,
+            timeout=VERIFY_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as e:
+        logger.warning("Verification probe failed for %s (%s); accepting unverified", probe_url, e)
+        return True
+
+    if response.status_code == 404:
+        return False
+    if response.status_code != 200:
+        logger.warning("Verification probe returned %s for %s; accepting unverified", response.status_code, probe_url)
+    return True
 
 
 async def search_content(
@@ -80,14 +126,16 @@ async def search_content(
     episode_title: str | None = None,
     media_type: str | None = None,
     services: list[StreamingService] | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> ContentSearchResult:
     """Search streaming services for content and return all matches.
 
     Steps:
         1. Build search query from structured fields and append site: filters.
         2. Call Brave Search.
-        3. Iterate through ALL results, match URLs to streaming services.
-        4. Return every match (one per service, in priority order).
+        3. Iterate through ALL results, match URLs to streaming services,
+           verifying ambiguous matches (spec §4/§11) when a client is given.
+        4. Return every verified match (one per service, in priority order).
 
     Args:
         title: Content title (e.g. "Rick and Morty").
@@ -97,6 +145,8 @@ async def search_content(
         episode_title: Optional episode title for better search.
         media_type: Optional override for Roku mediaType param.
         services: Optional subset of streaming services to search.
+        http_client: Client for verification probes; omitting it skips probes
+            (fail open).
 
     Returns:
         ContentSearchResult with all matches across services.
@@ -128,6 +178,16 @@ async def search_content(
         matched = match_url_full(result.url, services=target_services)
         if matched:
             if matched.service.name in seen_services:
+                continue
+            # Spec §11: a rejected candidate must not satisfy or block its
+            # service — keep scanning so a later legit URL can claim it.
+            if not await _verify_match(matched, result.url, http_client):
+                logger.info(
+                    "Rejected %s candidate %s (verification probe 404): %s",
+                    matched.service.name,
+                    matched.content_id,
+                    result.url,
+                )
                 continue
             seen_services.add(matched.service.name)
             matches.append(

@@ -7,25 +7,39 @@ import pytest
 
 from app.core.brave_search import BraveSearchError, SearchResult
 from app.core.search_and_play import build_search_query, launch_on_roku, search_content
-from app.core.streaming import HULU, NETFLIX
+from app.core.streaming import AMAZON_PRIME, HULU, NETFLIX
 
 ROKU_BASE_URL = "http://192.168.1.100:8060"
 
+# Bye Bye Birdie, the case that motivated spec §4/§11 verification: the DVD's
+# retail ASIN and the Prime Video title share the /dp/{ASIN} URL shape.
+DVD_URL = "https://www.amazon.com/Bye-Birdie-Jason-Alexander/dp/B0002V7TDI"
+VIDEO_URL = "https://www.amazon.com/Bye-Birdie-Janet-Leigh/dp/B001G5RFHE"
+
+
+def _probe_response(status_code: int) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status_code
+    return response
+
 
 class TestBuildSearchQuery:
+    """Queries lead with "watch" per roku-deeplink-spec §11: bare-title queries
+    rank retail/placeholder pages above streaming pages."""
+
     def test_title_only(self) -> None:
-        assert build_search_query("The Bear") == "The Bear"
+        assert build_search_query("The Bear") == "watch The Bear"
 
     def test_title_and_season(self) -> None:
-        assert build_search_query("The Bear", season=3) == "The Bear Season 3"
+        assert build_search_query("The Bear", season=3) == "watch The Bear Season 3"
 
     def test_full_episode(self) -> None:
         result = build_search_query("Rick and Morty", season=4, episode=5, episode_title="Rattlestar Ricklactica")
-        assert result == "Rick and Morty Season 4 Episode 5 Rattlestar Ricklactica"
+        assert result == "watch Rick and Morty Season 4 Episode 5 Rattlestar Ricklactica"
 
     def test_title_and_episode_title(self) -> None:
         result = build_search_query("Rick and Morty", episode_title="Rattlestar Ricklactica")
-        assert result == "Rick and Morty Rattlestar Ricklactica"
+        assert result == "watch Rick and Morty Rattlestar Ricklactica"
 
 
 class TestSearchContent:
@@ -134,6 +148,130 @@ class TestSearchContent:
         assert len(parsed["matches"]) == 1
         assert parsed["matches"][0]["service_name"] == "netflix"
         assert parsed["matches"][0]["channel_id"] == 12
+
+
+class TestSearchContentVerification:
+    """Prime Video ASIN verification (spec §4) and candidate handling (§11)."""
+
+    @pytest.mark.asyncio
+    async def test_rejected_candidate_does_not_lock_service(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        """A probe-rejected DVD ASIN must leave the service claimable by the
+        real Prime Video ASIN ranked below it."""
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Amazon.com: Bye Bye Birdie : DVD", url=DVD_URL, description=""),
+            SearchResult(title="Watch Bye Bye Birdie | Prime Video", url=VIDEO_URL, description=""),
+        ]
+        mock_http_client.get.side_effect = [_probe_response(404), _probe_response(200)]
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[AMAZON_PRIME],
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert len(result.matches) == 1
+        assert result.matches[0].content_id == "B001G5RFHE"
+        probe_urls = [c.args[0] for c in mock_http_client.get.call_args_list]
+        assert probe_urls == [
+            "https://www.primevideo.com/detail/B0002V7TDI",
+            "https://www.primevideo.com/detail/B001G5RFHE",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_all_candidates_rejected(self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Amazon.com: Bye Bye Birdie : DVD", url=DVD_URL, description=""),
+        ]
+        mock_http_client.get.return_value = _probe_response(404)
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[AMAZON_PRIME],
+            http_client=mock_http_client,
+        )
+
+        assert result.success is False
+        assert result.matches == []
+
+    @pytest.mark.asyncio
+    async def test_unambiguous_video_paths_skip_probe(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        """/gp/video/ paths are inherently video pages — no probe needed."""
+        mock_brave_client.search.return_value = [
+            SearchResult(
+                title="Watch Bye Bye Birdie | Prime Video",
+                url="https://www.amazon.com/gp/video/detail/B001G5RFHE",
+                description="",
+            ),
+        ]
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[AMAZON_PRIME],
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == "B001G5RFHE"
+        mock_http_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_probe_error_fails_open(self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock) -> None:
+        """A transient probe failure must never block a legitimate launch."""
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Watch Bye Bye Birdie | Prime Video", url=VIDEO_URL, description=""),
+        ]
+        mock_http_client.get.side_effect = httpx.ConnectError("boom")
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[AMAZON_PRIME],
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == "B001G5RFHE"
+
+    @pytest.mark.asyncio
+    async def test_bot_wall_status_fails_open(self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Watch Bye Bye Birdie | Prime Video", url=VIDEO_URL, description=""),
+        ]
+        mock_http_client.get.return_value = _probe_response(503)
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[AMAZON_PRIME],
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == "B001G5RFHE"
+
+    @pytest.mark.asyncio
+    async def test_no_http_client_skips_probe(self, mock_brave_client: AsyncMock) -> None:
+        """Without a probe client, matches are accepted unverified (fail open)."""
+        mock_brave_client.search.return_value = [
+            SearchResult(title="Amazon.com: Bye Bye Birdie : DVD", url=DVD_URL, description=""),
+        ]
+
+        result = await search_content(
+            title="Bye Bye Birdie",
+            brave_client=mock_brave_client,
+            services=[AMAZON_PRIME],
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == "B0002V7TDI"
 
 
 class TestSearchContentFailures:

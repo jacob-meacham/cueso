@@ -121,6 +121,36 @@
       }
     },
     {
+      "url": "https://www.hbomax.com/shows/white-lotus/14f9834d-bc23-41a8-ab61-5c8abdbea505",
+      "expected": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "14f9834d-bc23-41a8-ab61-5c8abdbea505",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://www.hbomax.com/shows/white-lotus/s1/14f9834d-bc23-41a8-ab61-5c8abdbea505/e1-arrivals/28",
+      "expected": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "14f9834d-bc23-41a8-ab61-5c8abdbea505",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://www.max.com/shows/some-show/abc-123",
+      "expected": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "abc-123",
+        "media_type": "movie",
+        "post_launch_key": "Select"
+      }
+    },
+    {
       "url": "https://www.amazon.com/gp/video/detail/B0DKTFF815",
       "expected": {
         "channel_id": "13",
@@ -235,6 +265,10 @@
       "description": "HBO Max root page"
     },
     {
+      "url": "https://www.hbomax.com/shows/white-lotus",
+      "description": "HBO Max show slug without an ID segment"
+    },
+    {
       "url": "https://amazon.com/browse",
       "description": "Amazon browse page"
     },
@@ -243,8 +277,20 @@
       "description": "Amazon root page"
     },
     {
+      "url": "https://www.youtube.com/",
+      "description": "YouTube root page"
+    },
+    {
+      "url": "https://www.youtube.com/watch?list=PLabc123",
+      "description": "YouTube watch URL with no v parameter"
+    },
+    {
+      "url": "https://www.youtube.com/@somecreator",
+      "description": "YouTube channel page, not a video"
+    },
+    {
       "url": "https://www.youtube.com/watch?v=abc123",
-      "description": "Unsupported streaming service"
+      "description": "YouTube watch URL with malformed video ID (not 11 characters)"
     },
     {
       "url": "https://www.google.com/",
@@ -263,9 +309,20 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "12", "params": "contentId=81444554&mediaType=movie"},
-          {"type": "wait", "milliseconds": 2000},
-          {"type": "keypress", "key": "Play", "count": 1}
+          {
+            "type": "launch",
+            "channel_id": "12",
+            "params": "contentId=81444554&mediaType=movie"
+          },
+          {
+            "type": "wait",
+            "milliseconds": 2000
+          },
+          {
+            "type": "keypress",
+            "key": "Play",
+            "count": 1
+          }
         ]
       }
     },
@@ -280,9 +337,20 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "291097", "params": "contentId=f63db666-b097-4c61-99c1-b778de2d4ae1&mediaType=movie"},
-          {"type": "wait", "milliseconds": 2000},
-          {"type": "keypress", "key": "Select", "count": 1}
+          {
+            "type": "launch",
+            "channel_id": "291097",
+            "params": "contentId=f63db666-b097-4c61-99c1-b778de2d4ae1&mediaType=movie"
+          },
+          {
+            "type": "wait",
+            "milliseconds": 2000
+          },
+          {
+            "type": "keypress",
+            "key": "Select",
+            "count": 1
+          }
         ]
       }
     },
@@ -297,9 +365,20 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "61322", "params": "contentId=bd43b2a4-1639-4197-96d4-2ec14eb45e9e&mediaType=movie"},
-          {"type": "wait", "milliseconds": 2000},
-          {"type": "keypress", "key": "Select", "count": 1}
+          {
+            "type": "launch",
+            "channel_id": "61322",
+            "params": "contentId=bd43b2a4-1639-4197-96d4-2ec14eb45e9e&mediaType=movie"
+          },
+          {
+            "type": "wait",
+            "milliseconds": 2000
+          },
+          {
+            "type": "keypress",
+            "key": "Select",
+            "count": 1
+          }
         ]
       }
     },
@@ -314,9 +393,20 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "13", "params": "contentId=B0DKTFF815&mediaType=movie"},
-          {"type": "wait", "milliseconds": 2000},
-          {"type": "keypress", "key": "Select", "count": 1}
+          {
+            "type": "launch",
+            "channel_id": "13",
+            "params": "contentId=B0DKTFF815&mediaType=movie"
+          },
+          {
+            "type": "wait",
+            "milliseconds": 2000
+          },
+          {
+            "type": "keypress",
+            "key": "Select",
+            "count": 1
+          }
         ]
       }
     },
@@ -329,7 +419,11 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "44191", "params": "Command=PlayNow&ItemIds=3f9a1c"}
+          {
+            "type": "launch",
+            "channel_id": "44191",
+            "params": "Command=PlayNow&ItemIds=3f9a1c"
+          }
         ]
       }
     },
@@ -343,7 +437,11 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "44191", "params": "Command=PlayNow&ItemIds=3f9a1c&StartPositionTicks=12000000000"}
+          {
+            "type": "launch",
+            "channel_id": "44191",
+            "params": "Command=PlayNow&ItemIds=3f9a1c&StartPositionTicks=12000000000"
+          }
         ]
       }
     },
@@ -358,9 +456,20 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "2285", "params": "contentId=565d8976-9e52-4f30-a6f5-a47e7fe1abd4&mediaType=movie"},
-          {"type": "wait", "milliseconds": 2000},
-          {"type": "keypress", "key": "Select", "count": 1}
+          {
+            "type": "launch",
+            "channel_id": "2285",
+            "params": "contentId=565d8976-9e52-4f30-a6f5-a47e7fe1abd4&mediaType=movie"
+          },
+          {
+            "type": "wait",
+            "milliseconds": 2000
+          },
+          {
+            "type": "keypress",
+            "key": "Select",
+            "count": 1
+          }
         ]
       }
     },
@@ -375,9 +484,20 @@
       "expected": {
         "type": "action_sequence",
         "actions": [
-          {"type": "launch", "channel_id": "551012", "params": "contentId=umc.cmc.1srk2goyh2q2zdxcx605w8vtx&mediaType=movie"},
-          {"type": "wait", "milliseconds": 2000},
-          {"type": "keypress", "key": "Select", "count": 1}
+          {
+            "type": "launch",
+            "channel_id": "551012",
+            "params": "contentId=umc.cmc.1srk2goyh2q2zdxcx605w8vtx&mediaType=movie"
+          },
+          {
+            "type": "wait",
+            "milliseconds": 2000
+          },
+          {
+            "type": "keypress",
+            "key": "Select",
+            "count": 1
+          }
         ]
       }
     }

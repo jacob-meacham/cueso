@@ -241,6 +241,7 @@ class RokuECPToolExecutor(ToolExecutor):
             episode=arguments.get("episode"),
             episode_title=arguments.get("episode_title"),
             media_type=arguments.get("media_type"),
+            http_client=self.http_client,
         )
         return result.to_tool_result()
 
