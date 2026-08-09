@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 
 import websockets
 
@@ -47,6 +48,34 @@ EVALS: list[dict[str, str]] = [
             "I think where a new doctor drops a scalpel on a doctor's foot"
         ),
         "description": "Identification question — must still search, not just answer",
+    },
+    {
+        "prompt": "Play that movie where the guy relives the same day over and over at a weather event",
+        "description": "Vague plot description (Groundhog Day)",
+    },
+    {
+        "prompt": "Put on the submarine movie with Gene Hackman and Denzel Washington",
+        "description": "Actor-based lookup (Crimson Tide)",
+    },
+    {
+        "prompt": "Play the newest Mission Impossible",
+        "description": "Franchise disambiguation — must resolve which entry is newest",
+    },
+    {
+        "prompt": "Can you put on Severence?",
+        "description": "Misspelled title (Severance)",
+    },
+    {
+        "prompt": "Play the Office episode where Michael grills his foot",
+        "description": "Episode-by-plot in a long series (S4 The Injury... research required)",
+    },
+    {
+        "prompt": "Play the movie where the guy says I'll be back",
+        "description": "Quote-based lookup (The Terminator)",
+    },
+    {
+        "prompt": "Put on the Christmas movie with Bill Murray as a TV executive",
+        "description": "Multi-constraint lookup (Scrooged)",
     },
 ]
 
@@ -157,24 +186,27 @@ async def run_all(ws_url: str, eval_indices: list[int]) -> int:
     print(f"Backend: {ws_url}")
     print(f"Running: {len(eval_indices)} eval(s)\n")
 
-    results: list[tuple[int, str, bool]] = []
+    results: list[tuple[int, str, bool, float]] = []
 
     for idx in eval_indices:
         ev = EVALS[idx]
+        t0 = time.perf_counter()
         passed = await run_eval(ws_url, ev["prompt"], idx + 1)
-        results.append((idx + 1, ev["prompt"], passed))
+        elapsed = time.perf_counter() - t0
+        results.append((idx + 1, ev["prompt"], passed, elapsed))
 
     # Summary
     print(f"\n{'=' * 70}")
     print("RESULTS")
     print(f"{'=' * 70}")
-    for num, prompt, passed in results:
+    for num, prompt, passed, elapsed in results:
         status = "PASS" if passed else "FAIL"
-        print(f"  [{status}] {num}. {prompt}")
+        print(f"  [{status}] {elapsed:6.1f}s  {num}. {prompt}")
 
-    passed_count = sum(1 for _, _, p in results if p)
+    passed_count = sum(1 for _, _, p, _ in results if p)
     total = len(results)
-    print(f"\n  {passed_count}/{total} passed")
+    total_time = sum(e for _, _, _, e in results)
+    print(f"\n  {passed_count}/{total} passed in {total_time:.1f}s (mean {total_time / max(total, 1):.1f}s/eval)")
 
     return 0 if passed_count == total else 1
 
