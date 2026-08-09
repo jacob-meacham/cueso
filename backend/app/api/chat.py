@@ -78,7 +78,7 @@ async def get_llm_provider() -> LLMProvider:
     elif settings.llm.provider == "openai":
         from ..core.llm.providers.openai import OpenAIProvider
 
-        return OpenAIProvider(api_key=api_key, model=settings.llm.model)
+        return OpenAIProvider(api_key=api_key, model=settings.llm.model, base_url=settings.llm.base_url)
     else:
         raise ValueError(f"Unsupported LLM provider: {settings.llm.provider}")
 

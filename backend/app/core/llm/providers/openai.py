@@ -11,10 +11,13 @@ from ..types import Message, MessageRole, SessionConfig, StreamResult, Tool, Too
 
 
 class OpenAIProvider(LLMProvider):
-    """OpenAI GPT provider implementation."""
+    """OpenAI GPT provider implementation.
 
-    def __init__(self, api_key: str, model: str = "gpt-4"):
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+    Also drives any OpenAI-compatible endpoint (e.g. OpenRouter) via base_url.
+    """
+
+    def __init__(self, api_key: str, model: str = "gpt-4", base_url: str | None = None):
+        self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model = model
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:

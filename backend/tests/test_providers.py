@@ -25,6 +25,19 @@ def openai_provider() -> OpenAIProvider:
     return OpenAIProvider(api_key="test-key")
 
 
+class TestOpenAIBaseUrl:
+    """base_url override routes the client to OpenAI-compatible endpoints
+    (e.g. OpenRouter) without changing anything else."""
+
+    def test_default_targets_openai(self) -> None:
+        provider = OpenAIProvider(api_key="test-key")
+        assert "api.openai.com" in str(provider.client.base_url)
+
+    def test_base_url_override(self) -> None:
+        provider = OpenAIProvider(api_key="test-key", base_url="https://openrouter.ai/api/v1")
+        assert str(provider.client.base_url).rstrip("/") == "https://openrouter.ai/api/v1"
+
+
 def _tool_fixture() -> Tool:
     return Tool(
         name="search",
