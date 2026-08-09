@@ -1,7 +1,7 @@
 # Cueso Configuration
 # Copy this file to config.yml and fill in your values.
 # Override the config path with CUESO_CONFIG=/path/to/config.yml
-# Env vars override YAML using double-underscore nesting: LLM__PROVIDER=openai
+# Env vars override YAML using double-underscore nesting: LLM__MODEL=z-ai/glm-5.2:nitro
 
 app:
   name: "Cueso Backend"
@@ -18,9 +18,10 @@ server:
   port: 8484
 
 llm:
-  provider: anthropic         # anthropic | openai
-  api_key: your_api_key_here
-  model: claude-3-5-sonnet-20241022
+  provider: openrouter        # OpenAI-compatible gateway (only supported value)
+  api_key: your_openrouter_api_key_here
+  model: anthropic/claude-sonnet-4.5   # any OpenRouter slug, e.g. z-ai/glm-5.2:nitro
+  # base_url: https://openrouter.ai/api/v1   # override for other OpenAI-compatible endpoints
 
 tools:
   executor: roku_ecp          # roku_ecp | mcp

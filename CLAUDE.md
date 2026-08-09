@@ -65,7 +65,7 @@ User Input (CLI/Web) → WebSocket /ws/chat → LLMSession → LLMProvider → T
 **Backend** (`backend/app/`):
 - `core/config.py` — Pydantic BaseSettings configuration, loaded from `config.yml` (YAML source with env var overrides)
 - `core/llm/provider.py` — Abstract base class for LLM providers (`generate`, `generate_stream`)
-- `core/llm/providers/` — Concrete implementations: `anthropic.py`, `openai.py`
+- `core/llm/providers/` — Concrete implementation: `openrouter.py` (OpenAI-compatible gateway; model set via `llm.model` OpenRouter slug)
 - `core/llm/session.py` — Manages conversation state and the tool-calling loop (LLM → tool call → tool result → LLM, up to `max_iterations`)
 - `core/llm/session_store.py` — Session persistence interface with in-memory implementation
 - `core/llm/tool_executor.py` — Tool execution strategies: `RokuECPToolExecutor` (direct HTTP), `MCPToolExecutor` (Model Context Protocol)
@@ -88,7 +88,7 @@ User Input (CLI/Web) → WebSocket /ws/chat → LLMSession → LLMProvider → T
 
 - **Provider pattern**: New LLM providers implement the `LLMProvider` ABC. Provider selection via `llm.provider` in config.
 - **Tool executor pattern**: New tool backends implement `ToolExecutor` ABC. Selected via `tools.executor` in config.
-- **Configuration**: All config via `config.yml` (repo root) using Pydantic Settings with `YamlConfigSettingsSource`. Env vars override YAML using `__` nesting (e.g. `LLM__PROVIDER=openai`). Config file path overridable via `CUESO_CONFIG` env var. See `config.yml.example`. In Docker, `config.yml` is mounted read-only into the container.
+- **Configuration**: All config via `config.yml` (repo root) using Pydantic Settings with `YamlConfigSettingsSource`. Env vars override YAML using `__` nesting (e.g. `LLM__MODEL=z-ai/glm-5.2:nitro`). Config file path overridable via `CUESO_CONFIG` env var. See `config.yml.example`. In Docker, `config.yml` is mounted read-only into the container.
 - **Streaming service priority**: Configurable in `streaming` (a list) — controls which services are active and their match order. Service definitions (regex, channel IDs) stay in code.
 - **Async throughout**: All I/O is async/await. Tests use `pytest-asyncio`.
 

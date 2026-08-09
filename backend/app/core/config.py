@@ -64,12 +64,10 @@ class ServerConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM provider settings."""
 
-    provider: str = "anthropic"
+    provider: str = "openrouter"
     api_key: SecretStr | None = None
-    model: str = "claude-3-5-sonnet-20241022"
-    # OpenAI-compatible endpoint override (e.g. https://openrouter.ai/api/v1).
-    # Only honored by the openai provider.
-    base_url: str | None = None
+    model: str = "anthropic/claude-sonnet-4.5"
+    base_url: str = "https://openrouter.ai/api/v1"
 
 
 class ToolsConfig(BaseModel):

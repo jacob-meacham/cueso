@@ -1,4 +1,4 @@
-"""OpenAI LLM provider implementation."""
+"""OpenRouter LLM provider implementation (OpenAI-compatible gateway)."""
 
 import json
 from collections.abc import AsyncGenerator
@@ -9,21 +9,24 @@ import openai
 from ..provider import LLMProvider
 from ..types import Message, MessageRole, SessionConfig, StreamResult, Tool, ToolCall
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-class OpenAIProvider(LLMProvider):
-    """OpenAI GPT provider implementation.
 
-    Also drives any OpenAI-compatible endpoint (e.g. OpenRouter) via base_url.
-    """
+class OpenRouterProvider(LLMProvider):
+    """OpenRouter provider — routes to any model behind OpenRouter's OpenAI-compatible API."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4", base_url: str | None = None):
-        self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+    def __init__(self, api_key: str, model: str, base_url: str = OPENROUTER_BASE_URL):
+        self.client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers={"X-Title": "Cueso"},
+        )
         self.model = model
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
-        """Convert our Message format to OpenAI's format.
+        """Convert our Message format to OpenAI-compatible format.
 
-        OpenAI expects tool results as role=tool messages with tool_call_id,
+        OpenAI-compatible expects tool results as role=tool messages with tool_call_id,
         and assistant messages with tool_calls must include the tool_calls array.
         """
         converted: list[dict[str, Any]] = []
@@ -66,7 +69,7 @@ class OpenAIProvider(LLMProvider):
         return converted
 
     def _convert_tools(self, tools: list[Tool]) -> list[dict[str, Any]]:
-        """Convert our Tool format to OpenAI's function calling format."""
+        """Convert our Tool format to OpenAI-compatible function calling format."""
         return [
             {
                 "type": "function",
@@ -95,7 +98,7 @@ class OpenAIProvider(LLMProvider):
         messages: list[Message],
         config: SessionConfig,
     ) -> tuple[str, list[ToolCall]]:
-        """Generate a non-streaming response from OpenAI."""
+        """Generate a non-streaming response from OpenRouter."""
         converted_messages = self._convert_messages(messages)
         converted_tools = self._convert_tools(config.tools) if config.tools else None
 
@@ -119,7 +122,7 @@ class OpenAIProvider(LLMProvider):
         config: SessionConfig,
         result: StreamResult,
     ) -> AsyncGenerator[dict[str, Any]]:
-        """Generate a streaming response from OpenAI.
+        """Generate a streaming response from OpenRouter.
 
         Yields event dicts for the client. Populates `result` with the
         accumulated content and tool_calls by the time the generator is done.
@@ -146,8 +149,14 @@ class OpenAIProvider(LLMProvider):
         _tool_arg_buffers: dict[int, str] = {}
         _tool_ids: dict[int, str] = {}
         _tool_names: dict[int, str] = {}
+        # OpenRouter's Claude route can emit finish_reason on more than one chunk for the
+        # same turn. message_complete marks "the end of a single LLM response" for
+        # clients (see docs/websocket-protocol.md) and must be yielded exactly once.
+        finalized = False
 
         async for chunk in stream:
+            if not chunk.choices:
+                continue
             delta = chunk.choices[0].delta
 
             # Text content
@@ -187,7 +196,11 @@ class OpenAIProvider(LLMProvider):
                             },
                         }
 
-            # Message complete — finalize accumulated tool calls
+            # Message complete — finalize accumulated tool calls.
+            # OpenRouter's Claude route can emit finish_reason on more than one
+            # chunk for the same turn; clear the accumulation dicts after
+            # finalizing so a repeat finish_reason chunk doesn't re-append the
+            # same tool calls (which would produce duplicate, non-unique ids).
             if chunk.choices[0].finish_reason:
                 for idx in sorted(_tool_ids.keys()):
                     raw_json = _tool_arg_buffers.get(idx, "{}")
@@ -198,13 +211,18 @@ class OpenAIProvider(LLMProvider):
                     current_tool_calls.append(
                         ToolCall(id=_tool_ids[idx], name=_tool_names.get(idx, ""), arguments=arguments)
                     )
+                _tool_ids.clear()
+                _tool_names.clear()
+                _tool_arg_buffers.clear()
 
-                yield {
-                    "type": "message_complete",
-                    "content": current_content,
-                    "tool_calls": [tc.name for tc in current_tool_calls],
-                    "finish_reason": chunk.choices[0].finish_reason,
-                }
+                if not finalized:
+                    finalized = True
+                    yield {
+                        "type": "message_complete",
+                        "content": current_content,
+                        "tool_calls": [tc.name for tc in current_tool_calls],
+                        "finish_reason": chunk.choices[0].finish_reason,
+                    }
 
         # Populate the result container for the session to consume
         result.content = current_content
