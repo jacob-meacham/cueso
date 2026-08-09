@@ -149,6 +149,10 @@ class OpenRouterProvider(LLMProvider):
         _tool_arg_buffers: dict[int, str] = {}
         _tool_ids: dict[int, str] = {}
         _tool_names: dict[int, str] = {}
+        # OpenRouter's Claude route can emit finish_reason on more than one chunk for the
+        # same turn. message_complete marks "the end of a single LLM response" for
+        # clients (see docs/websocket-protocol.md) and must be yielded exactly once.
+        finalized = False
 
         async for chunk in stream:
             if not chunk.choices:
@@ -211,12 +215,14 @@ class OpenRouterProvider(LLMProvider):
                 _tool_names.clear()
                 _tool_arg_buffers.clear()
 
-                yield {
-                    "type": "message_complete",
-                    "content": current_content,
-                    "tool_calls": [tc.name for tc in current_tool_calls],
-                    "finish_reason": chunk.choices[0].finish_reason,
-                }
+                if not finalized:
+                    finalized = True
+                    yield {
+                        "type": "message_complete",
+                        "content": current_content,
+                        "tool_calls": [tc.name for tc in current_tool_calls],
+                        "finish_reason": chunk.choices[0].finish_reason,
+                    }
 
         # Populate the result container for the session to consume
         result.content = current_content

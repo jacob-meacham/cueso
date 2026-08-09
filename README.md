@@ -33,11 +33,11 @@ Backend at http://localhost:8483, frontend at http://localhost:8484.
 ### Backend
 
 Copy `config.yml.example` to `config.yml` and fill in:
-- `llm.api_key` — your Anthropic or OpenAI API key
+- `llm.api_key` — your OpenRouter API key
 - `roku.ip` — your Roku device's IP address
 - `brave.api_key` — Brave Search API key (for content search)
 
-Settings can be overridden with env vars using `__` nesting (e.g. `LLM__PROVIDER=openai`).
+Settings can be overridden with env vars using `__` nesting (e.g. `LLM__MODEL=z-ai/glm-5.2:nitro`).
 See the example file for all available options.
 
 ### Frontend

@@ -1,7 +1,7 @@
 # Cueso Configuration
 # Copy this file to config.yml and fill in your values.
 # Override the config path with CUESO_CONFIG=/path/to/config.yml
-# Env vars override YAML using double-underscore nesting: LLM__PROVIDER=openai
+# Env vars override YAML using double-underscore nesting: LLM__MODEL=z-ai/glm-5.2:nitro
 
 app:
   name: "Cueso Backend"

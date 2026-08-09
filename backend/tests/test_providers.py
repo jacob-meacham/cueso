@@ -267,12 +267,22 @@ class TestOpenRouterStreamGuard:
             "create",
             AsyncMock(return_value=fake_stream()),
         ):
-            [
+            events = [
                 e
                 async for e in openrouter_provider.generate_stream(
                     [Message(role=MessageRole.USER, content="weather please")], config, result
                 )
             ]
+
+        # OpenRouter's Claude route can emit finish_reason on more than one chunk for the
+        # same turn (two `_choice("", "tool_calls")` chunks above). The client (CLI and
+        # web) treats message_complete as "the end of a single LLM response" and reacts
+        # to it once per response — a second occurrence causes the CLI to re-print the
+        # full assistant narration. Only the first finish_reason chunk should yield it.
+        message_complete_events = [e for e in events if e["type"] == "message_complete"]
+        assert len(message_complete_events) == 1, (
+            f"expected exactly one message_complete event, got {len(message_complete_events)}"
+        )
 
         assert len(result.tool_calls) == 2
         ids = [tc.id for tc in result.tool_calls]
