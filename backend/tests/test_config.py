@@ -18,7 +18,7 @@ class TestSettingsDefaults:
             s = Settings()
             assert s.app.name == "Cueso Backend"
             assert s.app.debug is True
-            assert s.llm.provider == "anthropic"
+            assert s.llm.provider == "openrouter"
 
     def test_streaming_default(self) -> None:
         with patch("app.core.config.CONFIG_FILE", _NO_FILE):
@@ -50,8 +50,9 @@ class TestSettingsDefaults:
             assert s.logging.level == "info"
             assert s.server.host == "0.0.0.0"
             assert s.server.port == 8483
-            assert s.llm.provider == "anthropic"
-            assert s.llm.model == "claude-3-5-sonnet-20241022"
+            assert s.llm.provider == "openrouter"
+            assert s.llm.model == "anthropic/claude-sonnet-4.5"
+            assert s.llm.base_url == "https://openrouter.ai/api/v1"
             assert s.tools.executor == "roku_ecp"
             assert s.roku.ip == "192.168.1.100"
             assert s.mcp.server_url == ""
@@ -60,7 +61,7 @@ class TestSettingsDefaults:
 class TestSecretStrFields:
     def test_llm_api_key_is_secret(self) -> None:
         with patch("app.core.config.CONFIG_FILE", _NO_FILE):
-            s = Settings(llm={"provider": "anthropic", "api_key": "sk-test-key"})  # type: ignore[arg-type]
+            s = Settings(llm={"provider": "openrouter", "api_key": "sk-test-key"})  # type: ignore[arg-type]
             assert isinstance(s.llm.api_key, SecretStr)
             assert s.llm.api_key.get_secret_value() == "sk-test-key"
             # SecretStr should not leak in repr
