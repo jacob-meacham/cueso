@@ -16,7 +16,7 @@ import httpx
 from .brave_search import BraveSearchClient, BraveSearchError
 from .emby import EMBY_CHANNEL_ID, EmbyClient, EmbyError
 from .streaming import StreamingService, UrlMatchResult, get_active_services, get_site_filters, match_url_full
-from .tmdb import TMDBClient
+from .tmdb import TitleAvailability, TMDBClient
 
 logger = logging.getLogger("cueso.search_and_play")
 
@@ -41,6 +41,9 @@ class ContentMatch:
     media_type: str
     post_launch_key: str | None = "Select"  # Key to press after launch; None = launch-only (Emby)
     resume_position_ticks: int | None = None  # Emby resume position, when partially watched
+    poster_url: str | None = None  # TMDB poster art for the searched title
+    season: int | None = None  # Season/episode from the request, echoed for display
+    episode: int | None = None
 
 
 @dataclass
@@ -155,10 +158,10 @@ async def search_content(
     """
     base_query = build_search_query(title, season, episode, episode_title)
 
-    oracle_task: asyncio.Task[set[str] | None] | None = None
-    if tmdb_client is not None and brave_client is not None:
+    oracle_task: asyncio.Task[TitleAvailability | None] | None = None
+    if tmdb_client is not None:
         oracle_task = asyncio.create_task(
-            tmdb_client.get_streamable_services(title, tv_only=season is not None or episode is not None)
+            tmdb_client.get_availability(title, tv_only=season is not None or episode is not None)
         )
 
     emby_matches, streaming = await asyncio.gather(
@@ -167,16 +170,17 @@ async def search_content(
     )
     streaming_matches, streaming_failure = streaming
 
-    streamable: set[str] | None = None
+    availability: TitleAvailability | None = None
     if oracle_task is not None:
-        if not streaming_matches:
-            # No streaming matches to filter; drop the in-flight lookup.
+        if not streaming_matches and not emby_matches:
+            # Nothing to filter or enrich; drop the in-flight lookup.
             oracle_task.cancel()
         else:
             try:
-                streamable = await asyncio.wait_for(oracle_task, timeout=ORACLE_TIMEOUT_SECONDS)
+                availability = await asyncio.wait_for(oracle_task, timeout=ORACLE_TIMEOUT_SECONDS)
             except Exception as e:
                 logger.warning("TMDB availability oracle failed (%s); returning matches unfiltered", e)
+    streamable: set[str] | None = availability.streamable if availability is not None else None
 
     # Emby is the user's own library, never a TMDB-tracked service — only
     # streaming matches are ever eligible for filtering.
@@ -198,6 +202,12 @@ async def search_content(
         else:
             message = streaming_failure or f"No content found for: {base_query}"
         return ContentSearchResult(success=False, message=message, query=base_query, matches=[])
+
+    poster_url = availability.poster_url if availability is not None else None
+    for match in matches:
+        match.season = season
+        match.episode = episode
+        match.poster_url = poster_url
 
     # Preserve first-seen order but de-dupe for the message; e.g. two Emby
     # matches must not read as "3 service(s): emby, emby, hulu".

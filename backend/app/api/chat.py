@@ -206,11 +206,13 @@ async def roku_launch(
     channel_id: int,
     content_id: str,
     media_type: str = "movie",
+    resume_position_ticks: int | None = None,
     http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     """Direct Roku launch endpoint for frontend use.
 
-    Proxies a launch request to the Roku ECP API.
+    Proxies a launch request to the Roku ECP API. resume_position_ticks is
+    honored for Emby launches so playback continues where the user left off.
     """
     from ..core.search_and_play import launch_on_roku
 
@@ -221,6 +223,7 @@ async def roku_launch(
         roku_base_url=roku_base_url,
         http_client=http_client,
         media_type=media_type,
+        resume_position_ticks=resume_position_ticks,
     )
     return {"success": result.success, "message": result.message}
 

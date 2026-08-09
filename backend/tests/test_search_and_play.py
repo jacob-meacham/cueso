@@ -9,6 +9,7 @@ from app.core.brave_search import BraveSearchError, SearchResult
 from app.core.emby import EmbyError, EmbyItem
 from app.core.search_and_play import ContentMatch, build_search_query, launch_on_roku, search_content
 from app.core.streaming import AMAZON_PRIME, HULU, NETFLIX
+from app.core.tmdb import TitleAvailability
 
 ROKU_BASE_URL = "http://192.168.1.100:8060"
 
@@ -659,6 +660,70 @@ class TestSearchContentEmby:
         assert result.matches == []
 
 
+class TestSearchContentEnrichment:
+    """Poster and season/episode metadata stamped onto matches."""
+
+    BEAR_HULU = SearchResult(
+        title="The Bear | Hulu",
+        url="https://www.hulu.com/series/the-bear-565d8976-9e52-4f30-a6f5-a47e7fe1abd4",
+        description="",
+    )
+    POSTER = "https://image.tmdb.org/t/p/w342/bear.jpg"
+
+    @pytest.mark.asyncio
+    async def test_season_episode_stamped_on_matches(self, mock_brave_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [self.BEAR_HULU]
+
+        result = await search_content("The Bear", mock_brave_client, season=2, episode=5, services=[HULU])
+
+        assert result.matches[0].season == 2
+        assert result.matches[0].episode == 5
+
+    @pytest.mark.asyncio
+    async def test_poster_stamped_on_streaming_and_emby_matches(
+        self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock, mock_tmdb_client: AsyncMock
+    ) -> None:
+        mock_emby_client.search.return_value = [EmbyItem(item_id="s1", name="The Bear", item_type="Series")]
+        mock_brave_client.search.return_value = [self.BEAR_HULU]
+        mock_tmdb_client.get_availability.return_value = TitleAvailability(streamable={"hulu"}, poster_url=self.POSTER)
+
+        result = await search_content(
+            "The Bear",
+            mock_brave_client,
+            emby_client=mock_emby_client,
+            tmdb_client=mock_tmdb_client,
+            services=[HULU],
+        )
+
+        assert [m.service_name for m in result.matches] == ["emby", "hulu"]
+        assert [m.poster_url for m in result.matches] == [self.POSTER, self.POSTER]
+
+    @pytest.mark.asyncio
+    async def test_emby_only_result_still_gets_poster(
+        self, mock_emby_client: AsyncMock, mock_tmdb_client: AsyncMock
+    ) -> None:
+        """Even with no Brave client at all, the oracle runs for the poster —
+        and an empty streamable set must never filter the Emby match."""
+        mock_emby_client.search.return_value = [EmbyItem(item_id="m1", name="Heat", item_type="Movie")]
+        mock_tmdb_client.get_availability.return_value = TitleAvailability(streamable=set(), poster_url=self.POSTER)
+
+        result = await search_content("Heat", None, emby_client=mock_emby_client, tmdb_client=mock_tmdb_client)
+
+        assert result.success is True
+        assert [m.service_name for m in result.matches] == ["emby"]
+        assert result.matches[0].poster_url == self.POSTER
+
+    @pytest.mark.asyncio
+    async def test_no_tmdb_client_leaves_enrichment_none(self, mock_brave_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [self.BEAR_HULU]
+
+        result = await search_content("The Bear", mock_brave_client, services=[HULU])
+
+        assert result.matches[0].poster_url is None
+        assert result.matches[0].season is None
+        assert result.matches[0].episode is None
+
+
 class TestSearchContentAvailabilityFilter:
     """TMDB oracle filtering: drop only on affirmative absence, fail open otherwise."""
 
@@ -678,7 +743,7 @@ class TestSearchContentAvailabilityFilter:
         self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
     ) -> None:
         mock_brave_client.search.return_value = [self.NETFLIX_RESULT, self.HULU_RESULT]
-        mock_tmdb_client.get_streamable_services.return_value = {"hulu"}
+        mock_tmdb_client.get_availability.return_value = TitleAvailability(streamable={"hulu"}, poster_url=None)
 
         result = await search_content(
             title="The Bear",
@@ -696,7 +761,7 @@ class TestSearchContentAvailabilityFilter:
         self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
     ) -> None:
         mock_brave_client.search.return_value = [self.NETFLIX_RESULT, self.HULU_RESULT]
-        mock_tmdb_client.get_streamable_services.return_value = None
+        mock_tmdb_client.get_availability.return_value = None
 
         result = await search_content(
             title="The Bear",
@@ -712,7 +777,7 @@ class TestSearchContentAvailabilityFilter:
     @pytest.mark.asyncio
     async def test_oracle_exception_fails_open(self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock) -> None:
         mock_brave_client.search.return_value = [self.NETFLIX_RESULT]
-        mock_tmdb_client.get_streamable_services.side_effect = RuntimeError("boom")
+        mock_tmdb_client.get_availability.side_effect = RuntimeError("boom")
 
         result = await search_content(
             title="Bye Bye Birdie",
@@ -728,12 +793,12 @@ class TestSearchContentAvailabilityFilter:
     async def test_oracle_timeout_fails_open(self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock) -> None:
         import asyncio as _asyncio
 
-        async def _slow(title: str, tv_only: bool = False) -> set[str]:
+        async def _slow(title: str, tv_only: bool = False) -> TitleAvailability:
             await _asyncio.sleep(30)
-            return set()
+            return TitleAvailability(streamable=set(), poster_url=None)
 
         mock_brave_client.search.return_value = [self.NETFLIX_RESULT]
-        mock_tmdb_client.get_streamable_services.side_effect = _slow
+        mock_tmdb_client.get_availability.side_effect = _slow
 
         with patch("app.core.search_and_play.ORACLE_TIMEOUT_SECONDS", 0.01):
             result = await search_content(
@@ -751,7 +816,7 @@ class TestSearchContentAvailabilityFilter:
         self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
     ) -> None:
         mock_brave_client.search.return_value = [self.NETFLIX_RESULT]
-        mock_tmdb_client.get_streamable_services.return_value = set()
+        mock_tmdb_client.get_availability.return_value = TitleAvailability(streamable=set(), poster_url=None)
 
         result = await search_content(
             title="Bye Bye Birdie",
@@ -767,7 +832,7 @@ class TestSearchContentAvailabilityFilter:
     @pytest.mark.asyncio
     async def test_tv_hint_from_season(self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock) -> None:
         mock_brave_client.search.return_value = [self.HULU_RESULT]
-        mock_tmdb_client.get_streamable_services.return_value = {"hulu"}
+        mock_tmdb_client.get_availability.return_value = TitleAvailability(streamable={"hulu"}, poster_url=None)
 
         await search_content(
             title="The Bear",
@@ -777,7 +842,7 @@ class TestSearchContentAvailabilityFilter:
             tmdb_client=mock_tmdb_client,
         )
 
-        mock_tmdb_client.get_streamable_services.assert_awaited_once_with("The Bear", tv_only=True)
+        mock_tmdb_client.get_availability.assert_awaited_once_with("The Bear", tv_only=True)
 
     @pytest.mark.asyncio
     async def test_no_tmdb_client_unchanged(self, mock_brave_client: AsyncMock) -> None:
@@ -793,23 +858,29 @@ class TestSearchContentAvailabilityFilter:
         assert len(result.matches) == 1
 
     @pytest.mark.asyncio
-    async def test_no_brave_client_skips_oracle_entirely(
-        self, mock_emby_client: AsyncMock, mock_tmdb_client: AsyncMock
+    async def test_no_matches_at_all_reports_search_failure(
+        self, mock_brave_client: AsyncMock, mock_tmdb_client: AsyncMock
     ) -> None:
-        """No Brave client means no streaming matches can exist to filter;
-        the oracle must never even be invoked."""
-        mock_emby_client.search.return_value = [EmbyItem(item_id="m1", name="Heat", item_type="Movie")]
+        """With nothing found anywhere the failure message reflects the search,
+        not the oracle; the in-flight lookup is dropped without waiting."""
+        import asyncio as _asyncio
+
+        async def _never(title: str, tv_only: bool = False) -> TitleAvailability:
+            await _asyncio.sleep(30)
+            raise AssertionError("unreachable")
+
+        mock_brave_client.search.return_value = []
+        mock_tmdb_client.get_availability.side_effect = _never
 
         result = await search_content(
-            "Heat",
-            None,
-            emby_client=mock_emby_client,
+            "Nonexistent",
+            mock_brave_client,
             tmdb_client=mock_tmdb_client,
         )
 
-        assert result.success is True
-        assert [m.service_name for m in result.matches] == ["emby"]
-        mock_tmdb_client.get_streamable_services.assert_not_awaited()
+        assert result.success is False
+        assert result.matches == []
+        assert "No search results found" in result.message
 
     @pytest.mark.asyncio
     async def test_emby_match_exempt_from_filtering(
@@ -824,7 +895,7 @@ class TestSearchContentAvailabilityFilter:
         mock_brave_client.search.return_value = [
             SearchResult(title="Heat | Netflix", url="https://www.netflix.com/watch/81444554", description="")
         ]
-        mock_tmdb_client.get_streamable_services.return_value = {"hulu"}
+        mock_tmdb_client.get_availability.return_value = TitleAvailability(streamable={"hulu"}, poster_url=None)
 
         result = await search_content(
             title="Heat",

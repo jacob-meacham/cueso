@@ -17,9 +17,12 @@ def _response(payload: dict[str, Any]) -> MagicMock:
     return response
 
 
-def _multi_result(media_type: str, tmdb_id: int, title: str) -> dict[str, Any]:
+def _multi_result(media_type: str, tmdb_id: int, title: str, poster_path: str | None = None) -> dict[str, Any]:
     key = "title" if media_type == "movie" else "name"
-    return {"media_type": media_type, "id": tmdb_id, key: title}
+    result: dict[str, Any] = {"media_type": media_type, "id": tmdb_id, key: title}
+    if poster_path is not None:
+        result["poster_path"] = poster_path
+    return result
 
 
 def _providers_payload(region: str, bucket_to_ids: dict[str, list[int]]) -> dict[str, Any]:
@@ -68,6 +71,66 @@ class TestProviderMap:
             350: "apple_tv_plus",
             2: "apple_tv_plus",
         }
+
+
+class TestGetAvailability:
+    @pytest.mark.asyncio
+    async def test_poster_from_first_candidate_with_path(self) -> None:
+        """The first title-matching candidate's poster_path becomes the w342 URL,
+        even when an earlier candidate lacks one."""
+        client, _ = _client_with(
+            {
+                "/search/multi": _response(
+                    {
+                        "results": [
+                            _multi_result("movie", 1, "Bye Bye Birdie"),
+                            _multi_result("movie", 2, "Bye Bye Birdie", poster_path="/abc123.jpg"),
+                        ]
+                    }
+                ),
+                "/movie/1/watch/providers": _response(_providers_payload("US", {"flatrate": [9]})),
+                "/movie/2/watch/providers": _response(_providers_payload("US", {"flatrate": [8]})),
+            }
+        )
+        availability = await client.get_availability("Bye Bye Birdie")
+        assert availability is not None
+        assert availability.poster_url == "https://image.tmdb.org/t/p/w342/abc123.jpg"
+        assert availability.streamable == {"amazon_prime", "netflix"}
+
+    @pytest.mark.asyncio
+    async def test_poster_none_when_no_candidate_has_path(self) -> None:
+        client, _ = _client_with(
+            {
+                "/search/multi": _response({"results": [_multi_result("tv", 1, "The Bear")]}),
+                "/tv/1/watch/providers": _response(_providers_payload("US", {"flatrate": [15]})),
+            }
+        )
+        availability = await client.get_availability("The Bear")
+        assert availability is not None
+        assert availability.poster_url is None
+        assert availability.streamable == {"hulu"}
+
+    @pytest.mark.asyncio
+    async def test_poster_survives_missing_region_data(self) -> None:
+        """No region data anywhere -> streamable None (no opinion) but the
+        poster is still usable."""
+        client, _ = _client_with(
+            {
+                "/search/multi": _response({"results": [_multi_result("tv", 1, "The Bear", poster_path="/bear.jpg")]}),
+                "/tv/1/watch/providers": _response({"results": {}}),
+            }
+        )
+        availability = await client.get_availability("The Bear")
+        assert availability is not None
+        assert availability.streamable is None
+        assert availability.poster_url == "https://image.tmdb.org/t/p/w342/bear.jpg"
+
+    @pytest.mark.asyncio
+    async def test_none_on_http_error(self) -> None:
+        http_client = AsyncMock(spec=httpx.AsyncClient)
+        http_client.get.side_effect = httpx.ConnectError("boom")
+        client = TMDBClient(api_key="k", http_client=http_client)
+        assert await client.get_availability("The Bear") is None
 
 
 class TestGetStreamableServices:

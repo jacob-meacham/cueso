@@ -9,12 +9,14 @@ pages). Design: docs/superpowers/specs/2026-08-08-tmdb-availability-design.md
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 
 import httpx
 
 logger = logging.getLogger("cueso.tmdb")
 
 TMDB_API_BASE = "https://api.themoviedb.org/3"
+TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w342"
 MAX_CANDIDATES = 3
 
 # TMDB provider IDs are stable; several map to one cueso service. Rent/buy
@@ -35,6 +37,18 @@ PROVIDER_ID_TO_SERVICE: dict[int, str] = {
 }
 
 _MONETIZATION_BUCKETS = ("flatrate", "free", "ads", "rent", "buy")
+
+
+@dataclass(frozen=True)
+class TitleAvailability:
+    """What TMDB knows about a title: where it streams, and its poster.
+
+    streamable is None when TMDB has no opinion (no region data) — callers
+    must not filter on it. The poster is independent of region data.
+    """
+
+    streamable: set[str] | None
+    poster_url: str | None
 
 
 def normalize_title(title: str) -> str:
@@ -68,12 +82,23 @@ class TMDBClient:
         or an API failure — callers must NOT filter on None. An empty set is a
         real answer: TMDB knows the title and no supported service streams it.
         """
+        availability = await self.get_availability(title, tv_only=tv_only)
+        return None if availability is None else availability.streamable
+
+    async def get_availability(self, title: str, tv_only: bool = False) -> TitleAvailability | None:
+        """Resolve a title to its streamable services and poster URL.
+
+        None means the lookup failed outright (no plausible candidates or an
+        API failure). Otherwise streamable carries the same tri-state contract
+        as get_streamable_services, and poster_url is the first title-matching
+        candidate's poster (None when TMDB has no artwork).
+        """
         try:
             candidates = await self._search_candidates(title, tv_only)
             if not candidates:
                 return None
             provider_sets = await asyncio.gather(
-                *(self._region_services(media_type, tmdb_id) for media_type, tmdb_id in candidates)
+                *(self._region_services(media_type, tmdb_id) for media_type, tmdb_id, _ in candidates)
             )
         except (httpx.HTTPError, ValueError, KeyError) as e:
             # httpx.HTTPStatusError's str() embeds the full request URL,
@@ -85,16 +110,18 @@ class TMDBClient:
                 getattr(getattr(e, "response", None), "status_code", "n/a"),
             )
             return None
+        poster_path = next((path for _, _, path in candidates if path), None)
+        poster_url = f"{TMDB_IMAGE_BASE}{poster_path}" if poster_path else None
         with_region_data = [s for s in provider_sets if s is not None]
         if not with_region_data:
-            return None
+            return TitleAvailability(streamable=None, poster_url=poster_url)
         streamable: set[str] = set()
         for services in with_region_data:
             streamable |= services
-        return streamable
+        return TitleAvailability(streamable=streamable, poster_url=poster_url)
 
-    async def _search_candidates(self, title: str, tv_only: bool) -> list[tuple[str, int]]:
-        """Resolve a title to (media_type, id) pairs by normalized-title equality."""
+    async def _search_candidates(self, title: str, tv_only: bool) -> list[tuple[str, int, str | None]]:
+        """Resolve a title to (media_type, id, poster_path) triples by normalized-title equality."""
         response = await self._get_client().get(
             f"{TMDB_API_BASE}/search/multi",
             params={"api_key": self.api_key, "query": title},
@@ -103,7 +130,7 @@ class TMDBClient:
         response.raise_for_status()
         wanted = ("tv",) if tv_only else ("movie", "tv")
         target = normalize_title(title)
-        candidates: list[tuple[str, int]] = []
+        candidates: list[tuple[str, int, str | None]] = []
         for result in response.json().get("results", []):
             media_type = result.get("media_type")
             if media_type not in wanted:
@@ -111,7 +138,7 @@ class TMDBClient:
             name = result.get("title") or result.get("name") or ""
             if normalize_title(name) != target:
                 continue
-            candidates.append((media_type, result["id"]))
+            candidates.append((media_type, result["id"], result.get("poster_path")))
             if len(candidates) == MAX_CANDIDATES:
                 break
         return candidates
