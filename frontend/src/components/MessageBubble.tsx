@@ -40,13 +40,19 @@ export default function MessageBubble({ message, onLaunch, launching }: Props) {
           </p>
         )}
 
-        {/* Content cards */}
+        {/* Content cards; a fallback line keeps terse models from rendering
+            a naked card row with no text at all */}
         {message.matches && message.matches.length > 0 && (
-          <ContentCards
-            matches={message.matches}
-            onLaunch={onLaunch}
-            launching={launching}
-          />
+          <>
+            {!message.content && !message.isStreaming && (
+              <p className="text-sm leading-relaxed">Here's what I found:</p>
+            )}
+            <ContentCards
+              matches={message.matches}
+              onLaunch={onLaunch}
+              launching={launching}
+            />
+          </>
         )}
       </div>
     </div>
