@@ -156,7 +156,7 @@ async def search_content(
     base_query = build_search_query(title, season, episode, episode_title)
 
     oracle_task: asyncio.Task[set[str] | None] | None = None
-    if tmdb_client is not None:
+    if tmdb_client is not None and brave_client is not None:
         oracle_task = asyncio.create_task(
             tmdb_client.get_streamable_services(title, tv_only=season is not None or episode is not None)
         )
@@ -169,10 +169,14 @@ async def search_content(
 
     streamable: set[str] | None = None
     if oracle_task is not None:
-        try:
-            streamable = await asyncio.wait_for(oracle_task, timeout=ORACLE_TIMEOUT_SECONDS)
-        except Exception as e:
-            logger.warning("TMDB availability oracle failed (%s); returning matches unfiltered", e)
+        if not streaming_matches:
+            # No streaming matches to filter; drop the in-flight lookup.
+            oracle_task.cancel()
+        else:
+            try:
+                streamable = await asyncio.wait_for(oracle_task, timeout=ORACLE_TIMEOUT_SECONDS)
+            except Exception as e:
+                logger.warning("TMDB availability oracle failed (%s); returning matches unfiltered", e)
 
     # Emby is the user's own library, never a TMDB-tracked service — only
     # streaming matches are ever eligible for filtering.
@@ -195,8 +199,10 @@ async def search_content(
             message = streaming_failure or f"No content found for: {base_query}"
         return ContentSearchResult(success=False, message=message, query=base_query, matches=[])
 
-    service_names = [m.service_name for m in matches]
-    message = f"Found content on {len(matches)} service(s): {', '.join(service_names)}"
+    # Preserve first-seen order but de-dupe for the message; e.g. two Emby
+    # matches must not read as "3 service(s): emby, emby, hulu".
+    service_names = list(dict.fromkeys(m.service_name for m in matches))
+    message = f"Found content on {len(service_names)} service(s): {', '.join(service_names)}"
     if filter_notes:
         message += " — " + "; ".join(filter_notes)
     return ContentSearchResult(success=True, message=message, query=base_query, matches=matches)

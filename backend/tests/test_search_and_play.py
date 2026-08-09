@@ -625,6 +625,30 @@ class TestSearchContentEmby:
         assert [m.service_name for m in result.matches] == ["emby"]
 
     @pytest.mark.asyncio
+    async def test_message_dedupes_repeated_service_names(
+        self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock
+    ) -> None:
+        """Two Emby matches must read as one "emby" entry in the summary
+        message, not "3 service(s): emby, emby, hulu"."""
+        mock_emby_client.search.return_value = [
+            EmbyItem(item_id="m1", name="Heat", item_type="Movie"),
+            EmbyItem(item_id="m2", name="Heat (1995)", item_type="Movie"),
+        ]
+        mock_brave_client.search.return_value = [
+            SearchResult(
+                title="Heat | Hulu",
+                url="https://www.hulu.com/series/the-bear-565d8976-9e52-4f30-a6f5-a47e7fe1abd4",
+                description="",
+            )
+        ]
+
+        result = await search_content("Heat", mock_brave_client, emby_client=mock_emby_client, services=[HULU])
+
+        assert result.success is True
+        assert len(result.matches) == 3
+        assert result.message == "Found content on 2 service(s): emby, hulu"
+
+    @pytest.mark.asyncio
     async def test_nothing_found_anywhere(self, mock_brave_client: AsyncMock, mock_emby_client: AsyncMock) -> None:
         mock_emby_client.search.return_value = []
         mock_brave_client.search.return_value = []
@@ -767,6 +791,25 @@ class TestSearchContentAvailabilityFilter:
 
         assert result.success is True
         assert len(result.matches) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_brave_client_skips_oracle_entirely(
+        self, mock_emby_client: AsyncMock, mock_tmdb_client: AsyncMock
+    ) -> None:
+        """No Brave client means no streaming matches can exist to filter;
+        the oracle must never even be invoked."""
+        mock_emby_client.search.return_value = [EmbyItem(item_id="m1", name="Heat", item_type="Movie")]
+
+        result = await search_content(
+            "Heat",
+            None,
+            emby_client=mock_emby_client,
+            tmdb_client=mock_tmdb_client,
+        )
+
+        assert result.success is True
+        assert [m.service_name for m in result.matches] == ["emby"]
+        mock_tmdb_client.get_streamable_services.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_emby_match_exempt_from_filtering(

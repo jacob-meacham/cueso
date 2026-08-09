@@ -1,5 +1,6 @@
 """Tests for the TMDB watch-providers availability oracle."""
 
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -165,11 +166,56 @@ class TestGetStreamableServices:
         assert await client.get_streamable_services("The Bear") == set()
 
     @pytest.mark.asyncio
+    async def test_region_is_case_insensitive(self) -> None:
+        """A lowercase config value like "us" must still match TMDB's
+        uppercase region keys instead of silently matching nothing."""
+        http_client = AsyncMock(spec=httpx.AsyncClient)
+
+        async def _get(url: str, **kwargs: Any) -> MagicMock:
+            if "/search/multi" in url:
+                return _response({"results": [_multi_result("movie", 1, "The Bear")]})
+            return _response(_providers_payload("US", {"flatrate": [8]}))
+
+        http_client.get.side_effect = _get
+        client = TMDBClient(api_key="k", region="us", http_client=http_client)
+        assert await client.get_streamable_services("The Bear") == {"netflix"}
+
+    @pytest.mark.asyncio
     async def test_http_error_returns_none(self) -> None:
         http_client = AsyncMock(spec=httpx.AsyncClient)
         http_client.get.side_effect = httpx.ConnectError("boom")
         client = TMDBClient(api_key="k", http_client=http_client)
         assert await client.get_streamable_services("The Bear") is None
+
+    @pytest.mark.asyncio
+    async def test_http_error_does_not_log_api_key(self, caplog: pytest.LogCaptureFixture) -> None:
+        """httpx.HTTPStatusError's str() embeds the full request URL — including
+        the api_key query param — so the warning log must never include it."""
+        api_key = "SECRETTESTKEY123"
+        request = httpx.Request(
+            "GET",
+            "https://api.themoviedb.org/3/search/multi",
+            params={"api_key": api_key, "query": "The Bear"},
+        )
+        try:
+            httpx.Response(401, request=request).raise_for_status()
+        except httpx.HTTPStatusError as caught:
+            error = caught
+        # Sanity check: the underlying exception really does leak the key,
+        # which is exactly why get_streamable_services must not log str(e).
+        assert api_key in str(error)
+
+        response = MagicMock()
+        response.raise_for_status.side_effect = error
+        http_client = AsyncMock(spec=httpx.AsyncClient)
+        http_client.get.return_value = response
+        client = TMDBClient(api_key=api_key, http_client=http_client)
+
+        with caplog.at_level(logging.WARNING, logger="cueso.tmdb"):
+            result = await client.get_streamable_services("The Bear")
+
+        assert result is None
+        assert api_key not in caplog.text
 
     @pytest.mark.asyncio
     async def test_candidate_cap_is_three(self) -> None:

@@ -52,7 +52,7 @@ class TMDBClient:
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.api_key = api_key
-        self.region = region
+        self.region = region.upper()
         self._http_client = http_client
         self._owns_client = http_client is None
 
@@ -76,7 +76,14 @@ class TMDBClient:
                 *(self._region_services(media_type, tmdb_id) for media_type, tmdb_id in candidates)
             )
         except (httpx.HTTPError, ValueError, KeyError) as e:
-            logger.warning("TMDB lookup failed for %r: %s", title, e)
+            # httpx.HTTPStatusError's str() embeds the full request URL,
+            # including the api_key query param — never log it directly.
+            logger.warning(
+                "TMDB lookup failed for %r: %s (%s)",
+                title,
+                type(e).__name__,
+                getattr(getattr(e, "response", None), "status_code", "n/a"),
+            )
             return None
         with_region_data = [s for s in provider_sets if s is not None]
         if not with_region_data:
