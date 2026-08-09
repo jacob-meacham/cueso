@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from app.core.tmdb import TMDBClient, normalize_title
+from app.core.tmdb import PROVIDER_ID_TO_SERVICE, TMDBClient, normalize_title
 
 
 def _response(payload: dict[str, Any]) -> MagicMock:
@@ -50,6 +50,23 @@ class TestNormalizeTitle:
 
     def test_distinct_titles_stay_distinct(self) -> None:
         assert normalize_title("Masha and the Bear") != normalize_title("The Bear")
+
+
+class TestProviderMap:
+    def test_exact_provider_id_mapping(self) -> None:
+        assert PROVIDER_ID_TO_SERVICE == {
+            8: "netflix",
+            1796: "netflix",
+            9: "amazon_prime",
+            10: "amazon_prime",
+            2100: "amazon_prime",
+            337: "disney_plus",
+            15: "hulu",
+            1899: "max",
+            384: "max",
+            350: "apple_tv_plus",
+            2: "apple_tv_plus",
+        }
 
 
 class TestGetStreamableServices:
