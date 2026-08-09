@@ -114,3 +114,18 @@ class TestEmbyConfig:
 
         settings = Settings()
         assert isinstance(settings.emby, EmbyConfig)
+
+
+class TestTMDBConfig:
+    def test_defaults(self) -> None:
+        from app.core.config import TMDBConfig
+
+        config = TMDBConfig()
+        assert config.api_key is None
+        assert config.region == "US"
+
+    def test_settings_has_tmdb(self) -> None:
+        from app.core.config import settings
+
+        assert settings.tmdb is not None
+        assert isinstance(settings.tmdb.region, str)

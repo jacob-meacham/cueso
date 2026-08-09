@@ -94,6 +94,13 @@ class BraveConfig(BaseModel):
     api_key: SecretStr | None = None
 
 
+class TMDBConfig(BaseModel):
+    """TMDB availability-oracle settings."""
+
+    api_key: SecretStr | None = None
+    region: str = "US"
+
+
 class EmbyConfig(BaseModel):
     """Emby self-hosted media server settings."""
 
@@ -116,6 +123,7 @@ class Settings(BaseSettings):
     roku: RokuConfig = Field(default_factory=RokuConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     brave: BraveConfig = Field(default_factory=BraveConfig)
+    tmdb: TMDBConfig = Field(default_factory=TMDBConfig)
     emby: EmbyConfig = Field(default_factory=EmbyConfig)
     streaming: list[str] = Field(
         default_factory=lambda: [
