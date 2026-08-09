@@ -165,24 +165,30 @@ of a genuine model-quality gap — that bug is now fixed, so the choice is a
 real tradeoff rather than a reliability verdict:
 
 - **GLM 5.2 Nitro** was faster on every eval in the pre-fix run (~14s vs
-  ~22s wall clock for the full suite) and is very likely cheaper per call
-  (nitro routing + non-frontier pricing), with no observed quality issues on
-  the prompts tested.
+  ~22s wall clock for the full suite), with no observed quality issues on
+  the prompts tested. (Relative per-call pricing between the two models was
+  not measured in either eval run — no cost claim is made here.)
 - **Claude Sonnet 4.5** was the system's prior default and the model this
-  system was originally designed around; its narration and research-eval
-  answers (e.g. correctly identifying "Rattlestar Ricklactica" S4E5 and
-  "Face Off" S4E13) were thorough and accurate once it could complete the
-  second round-trip.
+  system was originally designed around. In the post-fix targeted rerun it
+  passed both evals 1 and 5 by the eval harness's own pass criteria (a
+  `find_content` match reached after a `web_search`-informed second
+  round-trip). Response content from that rerun was not captured for
+  comparison, so no claim is made here about the quality of Claude's
+  post-fix research answers specifically — only that the id-collision
+  defect no longer blocks the round-trip. (The "Rattlestar Ricklactica" /
+  "Face Off" identifications mentioned elsewhere in this doc are GLM's,
+  from the pre-fix run — see "Notable behavioral differences" above.)
 - Both models exhibited the same pre-existing, separate inefficiency
   (duplicate parallel tool calls per turn) noted above — not a
   differentiator between them.
 
 **Final call belongs to the user/product owner** — this is a
-speed-and-cost-vs-familiarity tradeoff between two models that both now work
-correctly through OpenRouter, not a bug-driven decision. If reverting to
-Claude as the default, note the confirmation above is a targeted 2-eval
-rerun; a fresh full 6-eval Claude run would give higher confidence before
-shipping that change.
+speed-vs-familiarity tradeoff (per-call cost was not measured for either
+model in these runs) between two models that both now work correctly
+through OpenRouter, not a bug-driven decision. If reverting to Claude as the
+default, note the confirmation above is a targeted 2-eval rerun; a fresh
+full 6-eval Claude run would give higher confidence before shipping that
+change.
 
 **Follow-up already completed (was "suggested" pre-fix, now done):** the
 `_tool_ids`/`_tool_arg_buffers`/`_tool_names` accumulator state in
