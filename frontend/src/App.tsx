@@ -17,27 +17,48 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [launching, setLaunching] = useState<string | null>(null);
 
-  // Ref for the streaming assistant message index so we can mutate without
-  // full state replacement on every content_delta.
-  const streamingIdx = useRef<number | null>(null);
+  // Identity of the assistant message currently being streamed. Assigned
+  // SYNCHRONOUSLY before any setState so a burst of WS events processed
+  // ahead of a React commit still targets one bubble (splitting bug).
+  const streamingId = useRef<string | null>(null);
+  // Full response text, accumulated ACROSS tool-loop iterations — never
+  // reset at message_complete, or later iterations replace earlier text.
   const contentBuffer = useRef("");
+  const separatorPending = useRef(false);
   const flushScheduled = useRef(false);
+
+  // Update the streaming assistant message by id.
+  const updateStreaming = useCallback((patch: (msg: ChatMessage) => ChatMessage) => {
+    const id = streamingId.current;
+    if (id === null) return;
+    setMessages((prev) => prev.map((m) => (m.id === id ? patch(m) : m)));
+  }, []);
+
+  // Create the streaming assistant message if none exists; returns its id.
+  const ensureStreaming = useCallback((initial?: Partial<ChatMessage>) => {
+    if (streamingId.current !== null) return streamingId.current;
+    const id = nextId();
+    streamingId.current = id;
+    const newMsg: ChatMessage = {
+      id,
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      toolCalls: [],
+      matches: null,
+      isToolRunning: false,
+      ...initial,
+    };
+    setMessages((prev) => [...prev, newMsg]);
+    return id;
+  }, []);
 
   // Flush buffered content to React state (batched via rAF)
   const flushBuffer = useCallback(() => {
     flushScheduled.current = false;
-    const idx = streamingIdx.current;
-    if (idx === null) return;
     const text = contentBuffer.current;
-    setMessages((prev) => {
-      const copy = [...prev];
-      const msg = copy[idx];
-      if (msg) {
-        copy[idx] = { ...msg, content: text };
-      }
-      return copy;
-    });
-  }, []);
+    updateStreaming((msg) => ({ ...msg, content: text }));
+  }, [updateStreaming]);
 
   const handleEvent = useCallback(
     (event: WSEvent) => {
@@ -47,29 +68,16 @@ export default function App() {
           break;
 
         case "content_delta": {
-          // If no assistant message is being streamed yet, create one
-          if (streamingIdx.current === null) {
-            const newMsg: ChatMessage = {
-              id: nextId(),
-              role: "assistant",
-              content: event.content,
-              isStreaming: true,
-              toolCalls: [],
-              matches: null,
-              isToolRunning: false,
-            };
-            contentBuffer.current = event.content;
-            setMessages((prev) => {
-              streamingIdx.current = prev.length;
-              return [...prev, newMsg];
-            });
-          } else {
-            // Append to buffer, schedule a flush
-            contentBuffer.current += event.content;
-            if (!flushScheduled.current) {
-              flushScheduled.current = true;
-              requestAnimationFrame(flushBuffer);
-            }
+          // Paragraph break between tool-loop iterations
+          if (separatorPending.current && contentBuffer.current) {
+            contentBuffer.current += "\n\n";
+          }
+          separatorPending.current = false;
+          contentBuffer.current += event.content;
+          ensureStreaming({ content: contentBuffer.current });
+          if (!flushScheduled.current) {
+            flushScheduled.current = true;
+            requestAnimationFrame(flushBuffer);
           }
           break;
         }
@@ -77,66 +85,23 @@ export default function App() {
         case "tool_call_delta": {
           const toolName = event.tool_call.name;
           if (!toolName) break;
-
-          // Ensure there's an assistant message to attach the tool call to
-          if (streamingIdx.current === null) {
-            const newMsg: ChatMessage = {
-              id: nextId(),
-              role: "assistant",
-              content: "",
-              isStreaming: true,
-              toolCalls: [toolName],
-              matches: null,
-              isToolRunning: true,
-            };
-            contentBuffer.current = "";
-            setMessages((prev) => {
-              streamingIdx.current = prev.length;
-              return [...prev, newMsg];
-            });
-          } else {
-            setMessages((prev) => {
-              const copy = [...prev];
-              const idx = streamingIdx.current!;
-              const msg = copy[idx];
-              if (msg && !msg.toolCalls.includes(toolName)) {
-                copy[idx] = {
-                  ...msg,
-                  toolCalls: [...msg.toolCalls, toolName],
-                  isToolRunning: true,
-                };
-              }
-              return copy;
-            });
-          }
+          ensureStreaming({ toolCalls: [toolName], isToolRunning: true });
+          updateStreaming((msg) =>
+            msg.toolCalls.includes(toolName)
+              ? { ...msg, isToolRunning: true }
+              : { ...msg, toolCalls: [...msg.toolCalls, toolName], isToolRunning: true },
+          );
           break;
         }
 
         case "message_complete": {
-          // Flush any remaining content
-          if (streamingIdx.current !== null) {
-            const idx = streamingIdx.current;
-            const finalContent = event.content || contentBuffer.current;
-            setMessages((prev) => {
-              const copy = [...prev];
-              const msg = copy[idx];
-              if (msg) {
-                copy[idx] = {
-                  ...msg,
-                  content: finalContent,
-                  isStreaming: false,
-                };
-              }
-              return copy;
-            });
-            contentBuffer.current = "";
-          }
+          const finalContent = contentBuffer.current || event.content;
+          updateStreaming((msg) => ({ ...msg, content: finalContent, isStreaming: false }));
           break;
         }
 
         case "tool_result": {
-          if (streamingIdx.current === null) break;
-          const idx = streamingIdx.current;
+          separatorPending.current = true;
 
           if (event.tool_name === "find_content" && !event.error) {
             try {
@@ -145,18 +110,11 @@ export default function App() {
                 matches: ContentMatch[];
               };
               if (parsed.success && parsed.matches.length > 0) {
-                setMessages((prev) => {
-                  const copy = [...prev];
-                  const msg = copy[idx];
-                  if (msg) {
-                    copy[idx] = {
-                      ...msg,
-                      matches: parsed.matches,
-                      isToolRunning: false,
-                    };
-                  }
-                  return copy;
-                });
+                updateStreaming((msg) => ({
+                  ...msg,
+                  matches: parsed.matches,
+                  isToolRunning: false,
+                }));
                 break;
               }
             } catch {
@@ -164,33 +122,20 @@ export default function App() {
             }
           }
 
-          // For all other tools, just clear the running indicator
-          setMessages((prev) => {
-            const copy = [...prev];
-            const msg = copy[idx];
-            if (msg) {
-              copy[idx] = { ...msg, isToolRunning: false };
-            }
-            return copy;
-          });
+          updateStreaming((msg) => ({ ...msg, isToolRunning: false }));
           break;
         }
 
         case "final": {
-          // Mark streaming complete
-          if (streamingIdx.current !== null) {
-            const idx = streamingIdx.current;
-            setMessages((prev) => {
-              const copy = [...prev];
-              const msg = copy[idx];
-              if (msg) {
-                copy[idx] = { ...msg, isStreaming: false, isToolRunning: false };
-              }
-              return copy;
-            });
-          }
-          streamingIdx.current = null;
+          updateStreaming((msg) => ({
+            ...msg,
+            content: contentBuffer.current || msg.content,
+            isStreaming: false,
+            isToolRunning: false,
+          }));
+          streamingId.current = null;
           contentBuffer.current = "";
+          separatorPending.current = false;
           setIsStreaming(false);
           break;
         }
@@ -206,15 +151,16 @@ export default function App() {
             matches: null,
             isToolRunning: false,
           };
-          streamingIdx.current = null;
+          streamingId.current = null;
           contentBuffer.current = "";
+          separatorPending.current = false;
           setMessages((prev) => [...prev, errMsg]);
           setIsStreaming(false);
           break;
         }
       }
     },
-    [flushBuffer],
+    [ensureStreaming, updateStreaming, flushBuffer],
   );
 
   const { send, status: wsStatus } = useWebSocket(WS_URL, {
@@ -244,7 +190,8 @@ export default function App() {
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsStreaming(true);
-      streamingIdx.current = null;
+      streamingId.current = null;
+      separatorPending.current = false;
       contentBuffer.current = "";
       send(text, sessionId);
     },
@@ -316,7 +263,8 @@ export default function App() {
     setMessages([]);
     setSessionId(null);
     setIsStreaming(false);
-    streamingIdx.current = null;
+    streamingId.current = null;
+      separatorPending.current = false;
     contentBuffer.current = "";
   }, [sessionId]);
 
