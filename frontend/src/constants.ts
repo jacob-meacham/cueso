@@ -12,6 +12,7 @@ export const SERVICE_COLORS: Record<string, string> = {
   apple_tv_plus: "#A2AAAD",
   amazon_prime: "#00A8E1",
   emby: "#52B54B",
+  youtube: "#FF0000",
 };
 
 export const SERVICE_DISPLAY_NAMES: Record<string, string> = {
@@ -22,4 +23,5 @@ export const SERVICE_DISPLAY_NAMES: Record<string, string> = {
   apple_tv_plus: "Apple TV+",
   amazon_prime: "Prime Video",
   emby: "My Library",
+  youtube: "YouTube",
 };

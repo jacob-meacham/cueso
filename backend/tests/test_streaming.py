@@ -237,7 +237,7 @@ class TestMatchUrlNoMatch:
 
 class TestServiceRegistry:
     def test_all_services_registered(self) -> None:
-        assert len(SERVICE_REGISTRY) == 6
+        assert len(SERVICE_REGISTRY) == 7
         assert "netflix" in SERVICE_REGISTRY
         assert "hulu" in SERVICE_REGISTRY
         assert "disney_plus" in SERVICE_REGISTRY
@@ -277,7 +277,7 @@ class TestGetActiveServices:
             mock_settings.streaming = []
             services = get_active_services()
             # Falls back to default when result would be empty
-            assert len(services) == 6
+            assert len(services) == 7
             assert services[0] is NETFLIX
 
 

@@ -32,10 +32,9 @@ agree with it, so the mapping cannot silently drift.
 Emby (channel_id 44191) is launch-only and addressed by descriptor, not URL:
 its 2 playback fixtures run against ``launch_on_roku`` (single launch POST,
 PlayNow params, optional StartPositionTicks, no wait/keypress); it is never
-produced by URL matching. YouTube (channel_id 837, added in spec v1.4.1) is
-not a selected channel in this repo: its valid-URL and playback fixtures are
-excluded at materialization; its invalid-URL fixtures remain, since they are
-no-match for cueso regardless.
+produced by URL matching. YouTube (channel_id 837, added in spec v1.4.1,
+selected here since the sync of 2026-08-09) is the first launch-only URL
+channel: a single launch with no wait/keypress.
 """
 
 import json
@@ -53,6 +52,7 @@ from app.core.streaming import (
     HULU,
     MAX,
     NETFLIX,
+    YOUTUBE,
     match_url_full,
 )
 
@@ -61,7 +61,7 @@ FIXTURES: dict[str, Any] = json.loads((Path(__file__).parent / "roku_deeplink_fi
 # All six channels cueso supports, in spec priority order. Passed explicitly so
 # the tests do not depend on config.yml, which may disable a service (it disables
 # Hulu in this repo) and would otherwise skip that channel's fixtures.
-ALL_SERVICES = [NETFLIX, HULU, DISNEY_PLUS, MAX, APPLE_TV_PLUS, AMAZON_PRIME]
+ALL_SERVICES = [NETFLIX, HULU, DISNEY_PLUS, MAX, APPLE_TV_PLUS, AMAZON_PRIME, YOUTUBE]
 
 # cueso internal service name -> (spec channel_id, spec channel_name).
 SERVICE_TO_SPEC_CHANNEL: dict[str, tuple[str, str]] = {
@@ -71,6 +71,7 @@ SERVICE_TO_SPEC_CHANNEL: dict[str, tuple[str, str]] = {
     "disney_plus": ("291097", "Disney+"),
     "max": ("61322", "HBO Max"),
     "apple_tv_plus": ("551012", "Apple TV+"),
+    "youtube": ("837", "YouTube"),
 }
 
 ROKU_BASE_URL = "http://192.168.1.100:8060"
@@ -99,7 +100,9 @@ class TestSpecFunction1ValidUrls:
         assert channel_name == expected["channel_name"]
         assert result.content_id == expected["content_id"]
         assert result.media_type == expected["media_type"]
-        assert result.post_launch_key == expected["post_launch_key"]
+        # Launch-only channels (YouTube) omit post_launch_key in the fixture;
+        # the live result must agree by carrying None.
+        assert result.post_launch_key == expected.get("post_launch_key")
 
 
 class TestSpecFunction1InvalidUrls:

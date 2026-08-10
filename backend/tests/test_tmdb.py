@@ -70,6 +70,8 @@ class TestProviderMap:
             384: "max",
             350: "apple_tv_plus",
             2: "apple_tv_plus",
+            192: "youtube",
+            235: "youtube",
         }
 
 

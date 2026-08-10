@@ -30,6 +30,7 @@ class TestSettingsDefaults:
                 "max",
                 "apple_tv_plus",
                 "amazon_prime",
+                "youtube",
             ]
 
     def test_streaming_is_list_of_strings(self) -> None:

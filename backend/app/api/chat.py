@@ -212,8 +212,14 @@ async def roku_launch(
 
     Proxies a launch request to the Roku ECP API. resume_position_ticks is
     honored for Emby launches so playback continues where the user left off.
+    The post-launch key comes from the channel registry (Play for Netflix,
+    none for launch-only channels like YouTube).
     """
     from ..core.search_and_play import launch_on_roku
+    from ..core.streaming import service_for_channel
+
+    service = service_for_channel(channel_id)
+    post_launch_key = service.post_launch_key if service is not None else "Select"
 
     roku_base_url = f"http://{settings.roku.ip}:{ROKU_ECP_PORT}"
     result = await launch_on_roku(
@@ -222,6 +228,7 @@ async def roku_launch(
         roku_base_url=roku_base_url,
         http_client=http_client,
         media_type=media_type,
+        post_launch_key=post_launch_key,
         resume_position_ticks=resume_position_ticks,
     )
     return {"success": result.success, "message": result.message}

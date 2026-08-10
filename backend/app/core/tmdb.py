@@ -34,6 +34,8 @@ PROVIDER_ID_TO_SERVICE: dict[int, str] = {
     384: "max",  # HBO Max (pre-rebrand legacy)
     350: "apple_tv_plus",  # Apple TV+
     2: "apple_tv_plus",  # Apple TV (rent/buy store)
+    192: "youtube",  # YouTube (rent/buy, verified live)
+    235: "youtube",  # YouTube Free (ads, verified live)
 }
 
 _MONETIZATION_BUCKETS = ("flatrate", "free", "ads", "rent", "buy")

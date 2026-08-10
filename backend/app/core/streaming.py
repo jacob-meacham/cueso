@@ -19,7 +19,8 @@ class StreamingService:
     domains: tuple[str, ...]
     url_patterns: tuple[re.Pattern[str], ...] = field(repr=False)
     default_media_type: str = "movie"
-    post_launch_key: str = "Select"  # Key to press after launch (Play for Netflix)
+    # Key to press after launch (Play for Netflix); None = launch-only (YouTube)
+    post_launch_key: str | None = "Select"
     media_type_from_url: bool = False  # Whether to detect media_type from the matched URL text
     # Per roku-deeplink-spec §4/§11: verification probe for search-sourced URLs.
     # GET of the filled template → 200 accept, 404 reject, anything else fail open.
@@ -131,12 +132,29 @@ APPLE_TV_PLUS = StreamingService(
     url_patterns=(re.compile(r"tv\.apple\.com/(?:\w{2}/)?(?:show|movie|episode)/[^/]+/(umc\.cmc\.[a-z0-9]+)"),),
 )
 
+YOUTUBE = StreamingService(
+    name="youtube",
+    roku_channel_id=837,
+    domains=("youtube.com", "youtu.be"),
+    url_patterns=(
+        # Per roku-deeplink-spec v1.4.1: the only channel capturing from a query
+        # parameter. (?:[^#\s]*&)? lets v= follow other params but the preceding
+        # segment must end in & so another param name (sv=) cannot match. The
+        # strict 11-char class rejects malformed IDs; youtu.be tracking params
+        # (?si=...) fall outside the capture.
+        re.compile(r"(?:youtube\.com/watch\?(?:[^#\s]*&)?v=|youtu\.be/)([A-Za-z0-9_-]{11})"),
+    ),
+    post_launch_key=None,  # Deep link auto-plays; single launch, no keypress
+)
+
 # --- Registry and config-driven priority ---
 
 SERVICE_REGISTRY: dict[str, StreamingService] = {
-    svc.name: svc for svc in [NETFLIX, HULU, DISNEY_PLUS, MAX, APPLE_TV_PLUS, AMAZON_PRIME]
+    svc.name: svc for svc in [NETFLIX, HULU, DISNEY_PLUS, MAX, APPLE_TV_PLUS, AMAZON_PRIME, YOUTUBE]
 }
 
+# YouTube last: its results are mostly clips/trailers, so any dedicated
+# streaming page for the title should win the search.
 _DEFAULT_PRIORITY: list[StreamingService] = [
     NETFLIX,
     HULU,
@@ -144,7 +162,13 @@ _DEFAULT_PRIORITY: list[StreamingService] = [
     MAX,
     APPLE_TV_PLUS,
     AMAZON_PRIME,
+    YOUTUBE,
 ]
+
+
+def service_for_channel(channel_id: int) -> StreamingService | None:
+    """Look up a registered service by Roku channel id (None for e.g. Emby)."""
+    return next((svc for svc in SERVICE_REGISTRY.values() if svc.roku_channel_id == channel_id), None)
 
 
 def get_active_services() -> list[StreamingService]:
@@ -181,7 +205,7 @@ class UrlMatchResult:
     service: StreamingService
     content_id: str
     media_type: str
-    post_launch_key: str
+    post_launch_key: str | None
 
 
 def match_url(url: str, services: list[StreamingService] | None = None) -> tuple[StreamingService, str] | None:

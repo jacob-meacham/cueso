@@ -359,6 +359,41 @@ async def test_launch_tool_streaming_defaults_select(mock_emby_client: AsyncMock
 
 
 @pytest.mark.asyncio
+async def test_launch_tool_registry_default_netflix_play(mock_emby_client: AsyncMock) -> None:
+    """An omitted key falls back to the channel registry: Netflix presses Play."""
+    mock_http_client = AsyncMock()
+    ok = MagicMock()
+    ok.status_code = 200
+    mock_http_client.post.return_value = ok
+
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, emby_client=mock_emby_client)
+    with patch("app.core.search_and_play.asyncio.sleep", new_callable=AsyncMock):
+        await executor.execute_tool(_tc("launch_on_roku", {"channel_id": 12, "content_id": "81444554"}))
+
+    assert mock_http_client.post.call_count == 2
+    assert "/keypress/Play" in mock_http_client.post.call_args_list[1].args[0]
+
+
+@pytest.mark.asyncio
+async def test_launch_tool_youtube_is_launch_only(mock_emby_client: AsyncMock) -> None:
+    """YouTube (837) is launch-only even when the model passes a null key —
+    a single launch POST, no keypress (spec v1.4.1)."""
+    mock_http_client = AsyncMock()
+    ok = MagicMock()
+    ok.status_code = 200
+    mock_http_client.post.return_value = ok
+
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, emby_client=mock_emby_client)
+    result = await executor.execute_tool(
+        _tc("launch_on_roku", {"channel_id": 837, "content_id": "dQw4w9WgXcQ", "post_launch_key": None})
+    )
+
+    assert json.loads(result)["success"] is True
+    assert mock_http_client.post.call_count == 1
+    assert "/launch/837" in mock_http_client.post.call_args_list[0].args[0]
+
+
+@pytest.mark.asyncio
 async def test_find_content_uses_emby(mock_emby_client: AsyncMock) -> None:
     """find_content works with Emby alone (no Brave configured)."""
     mock_http_client = AsyncMock()

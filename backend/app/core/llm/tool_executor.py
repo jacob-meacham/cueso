@@ -276,8 +276,15 @@ class RokuECPToolExecutor(ToolExecutor):
         # Emby is launch-only: never press a key, whatever the model passed.
         if channel == EMBY_CHANNEL_ID:
             post_launch_key: str | None = None
+        elif arguments.get("post_launch_key"):
+            post_launch_key = arguments["post_launch_key"]
         else:
-            post_launch_key = arguments.get("post_launch_key") or "Select"
+            # Model omitted it (or passed null): the channel registry knows the
+            # right key — Play for Netflix, none at all for YouTube (launch-only).
+            from ..streaming import service_for_channel
+
+            service = service_for_channel(channel)
+            post_launch_key = service.post_launch_key if service is not None else "Select"
 
         resume_ticks = arguments.get("resume_position_ticks")
 

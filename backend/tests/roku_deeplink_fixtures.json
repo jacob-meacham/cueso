@@ -229,6 +229,42 @@
         "media_type": "movie",
         "post_launch_key": "Select"
       }
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "expected": {
+        "channel_id": "837",
+        "channel_name": "YouTube",
+        "content_id": "dQw4w9WgXcQ",
+        "media_type": "movie"
+      }
+    },
+    {
+      "url": "https://youtu.be/dQw4w9WgXcQ",
+      "expected": {
+        "channel_id": "837",
+        "channel_name": "YouTube",
+        "content_id": "dQw4w9WgXcQ",
+        "media_type": "movie"
+      }
+    },
+    {
+      "url": "https://www.youtube.com/watch?app=desktop&v=jNQXAC9IVRw",
+      "expected": {
+        "channel_id": "837",
+        "channel_name": "YouTube",
+        "content_id": "jNQXAC9IVRw",
+        "media_type": "movie"
+      }
+    },
+    {
+      "url": "https://youtu.be/jNQXAC9IVRw?si=AbCdEfGh123",
+      "expected": {
+        "channel_id": "837",
+        "channel_name": "YouTube",
+        "content_id": "jNQXAC9IVRw",
+        "media_type": "movie"
+      }
     }
   ],
   "invalid_urls": [
@@ -497,6 +533,24 @@
             "type": "keypress",
             "key": "Select",
             "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "channel_id": "837",
+        "channel_name": "YouTube",
+        "content_id": "dQw4w9WgXcQ",
+        "media_type": "movie"
+      },
+      "expected": {
+        "type": "action_sequence",
+        "actions": [
+          {
+            "type": "launch",
+            "channel_id": "837",
+            "params": "contentId=dQw4w9WgXcQ&mediaType=movie"
           }
         ]
       }
