@@ -43,6 +43,66 @@ def test_server_url_trailing_slash_stripped(client: EmbyClient) -> None:
     assert client.server_url == "http://emby.local:8096"
 
 
+class TestSearchTitleFilter:
+    """Emby's SearchTerm is fuzzy (matches on any shared word); results whose
+    title doesn't actually correspond to the query must be dropped."""
+
+    @pytest.mark.asyncio
+    async def test_fuzzy_noise_dropped(self, client: EmbyClient, http_client: AsyncMock) -> None:
+        """'Charlie bit my finger' must not surface 'My Neighbor Totoro' just
+        because both contain 'my' (observed live)."""
+        http_client.get.return_value = _response(
+            {"Items": [_movie("m1", "My Neighbor Totoro"), _movie("m2", "My Life as a Dog")]}
+        )
+
+        items = await client.search("Charlie bit my finger")
+
+        assert items == []
+
+    @pytest.mark.asyncio
+    async def test_exact_title_kept(self, client: EmbyClient, http_client: AsyncMock) -> None:
+        http_client.get.return_value = _response({"Items": [_movie("m1", "Heat")]})
+
+        items = await client.search("Heat")
+
+        assert [i.name for i in items] == ["Heat"]
+
+    @pytest.mark.asyncio
+    async def test_decorated_library_name_kept(self, client: EmbyClient, http_client: AsyncMock) -> None:
+        """Library naming quirks like a year suffix must not lose the match."""
+        http_client.get.return_value = _response({"Items": [_movie("m1", "Heat (1995)")]})
+
+        items = await client.search("Heat")
+
+        assert [i.name for i in items] == ["Heat (1995)"]
+
+    @pytest.mark.asyncio
+    async def test_word_fragment_not_matched(self, client: EmbyClient, http_client: AsyncMock) -> None:
+        """Containment is per word sequence, not per character: 'It' is not a
+        match for 'The Italian Job'."""
+        http_client.get.return_value = _response({"Items": [_movie("m1", "The Italian Job")]})
+
+        items = await client.search("It")
+
+        assert items == []
+
+    @pytest.mark.asyncio
+    async def test_filter_applies_before_episode_resolution(
+        self, client: EmbyClient, http_client: AsyncMock
+    ) -> None:
+        """A non-matching series is dropped without fetching its episodes."""
+        http_client.get.side_effect = [
+            _response({"Items": [_series("s1", "Severance"), _series("s2", "Everest")]}),
+            _response({"Items": [{"Id": "ep25", "IndexNumber": 5, "Type": "Episode", "Name": "Trojan's Horse"}]}),
+        ]
+
+        items = await client.search("Severance", season=2, episode=5)
+
+        assert [i.item_id for i in items] == ["ep25"]
+        # Only Severance's episodes were fetched: initial search + one episode call
+        assert http_client.get.call_count == 2
+
+
 class TestSearch:
     @pytest.mark.asyncio
     async def test_search_request_shape(self, client: EmbyClient, http_client: AsyncMock) -> None:

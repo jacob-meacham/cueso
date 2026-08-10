@@ -6,10 +6,29 @@ from typing import Any
 
 import httpx
 
+from .tmdb import normalize_title
+
 logger = logging.getLogger("cueso.emby")
 
 # Roku channel ID for the Emby app, per roku-deeplink spec (launch-only channel).
 EMBY_CHANNEL_ID = 44191
+
+
+def _title_matches(query: str, item_name: str) -> bool:
+    """Whether a library item's title genuinely corresponds to the query.
+
+    Emby's SearchTerm is fuzzy — any shared word matches, so "Charlie bit my
+    finger" surfaces "My Neighbor Totoro". Require one normalized title's word
+    sequence to appear contiguously in the other: word-level so "It" never
+    matches "The Italian Job", containment (not equality) so a library name
+    with a year suffix ("Heat (1995)") still matches "Heat".
+    """
+    q = normalize_title(query).split()
+    n = normalize_title(item_name).split()
+    if not q or not n:
+        return False
+    short, long_ = (q, n) if len(q) <= len(n) else (n, q)
+    return any(long_[i : i + len(short)] == short for i in range(len(long_) - len(short) + 1))
 
 
 @dataclass
@@ -84,6 +103,12 @@ class EmbyClient:
         )
         raw_items: list[dict[str, Any]] = data.get("Items", [])
         items = [self._parse_item(raw) for raw in raw_items]
+        # This runs before episode resolution, so every name here is a movie or
+        # series title (never an episode title).
+        dropped = [item.name for item in items if not _title_matches(title, item.name)]
+        if dropped:
+            logger.info("Dropped %d fuzzy Emby match(es) for %r: %s", len(dropped), title, dropped)
+        items = [item for item in items if _title_matches(title, item.name)]
 
         if season is None or episode is None:
             return items
