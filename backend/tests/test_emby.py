@@ -87,9 +87,7 @@ class TestSearchTitleFilter:
         assert items == []
 
     @pytest.mark.asyncio
-    async def test_filter_applies_before_episode_resolution(
-        self, client: EmbyClient, http_client: AsyncMock
-    ) -> None:
+    async def test_filter_applies_before_episode_resolution(self, client: EmbyClient, http_client: AsyncMock) -> None:
         """A non-matching series is dropped without fetching its episodes."""
         http_client.get.side_effect = [
             _response({"Items": [_series("s1", "Severance"), _series("s2", "Everest")]}),
