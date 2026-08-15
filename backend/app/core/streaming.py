@@ -1,6 +1,6 @@
 """Streaming service registry for content ID extraction and Roku deep linking.
 
-Generated from spec library roku-deeplink v1.5.0 (speclib).
+Generated from spec library roku-deeplink v1.6.0 (speclib).
 """
 
 import logging
@@ -21,7 +21,18 @@ class StreamingService:
     default_media_type: str = "movie"
     # Key to press after launch (Play for Netflix); None = launch-only (YouTube)
     post_launch_key: str | None = "Select"
-    media_type_from_url: bool = False  # Whether to detect media_type from the matched URL text
+    # Substrings of the regex-matched text that mark a series page (Netflix
+    # /title/, Max /shows/); any hit makes get_media_type return "series".
+    series_url_markers: tuple[str, ...] = ()
+    # Per-pattern media_type overrides, index-aligned with url_patterns; None
+    # (or a missing index) falls back to get_media_type(). Lets one URL shape
+    # (a Max episode page) carry a different type than the service default.
+    pattern_media_types: tuple[str | None, ...] = ()
+    # Whether the channel's Roku app honors ECP deep-link params. False for
+    # Apple TV (device-verified 2026-08-15: every contentId/mediaType form
+    # lands on the app home screen) — launching only opens the app, so callers
+    # should warn that the title must be selected manually.
+    supports_deep_link: bool = True
     # Per roku-deeplink-spec §4/§11: verification probe for search-sourced URLs.
     # GET of the filled template → 200 accept, 404 reject, anything else fail open.
     verify_url_template: str | None = None
@@ -49,9 +60,9 @@ class StreamingService:
 
         Must be given the matched text (regex group 0), not the full URL: the
         other path segment can appear elsewhere in the URL (e.g. a query
-        parameter), but exactly one of /watch/ or /title/ appears in a match.
+        parameter), but exactly one marker segment appears in a match.
         """
-        if self.media_type_from_url and "/title/" in matched_text:
+        if any(marker in matched_text for marker in self.series_url_markers):
             return "series"
         return self.default_media_type
 
@@ -68,7 +79,7 @@ NETFLIX = StreamingService(
         re.compile(r"netflix\.com/(?:\w{2}(?:-\w{2})?/)?(?:watch|title)/(\d+)"),
     ),
     post_launch_key="Play",
-    media_type_from_url=True,  # /watch/ = movie, /title/ = series
+    series_url_markers=("/title/",),  # /watch/ = movie, /title/ = series
 )
 
 AMAZON_PRIME = StreamingService(
@@ -109,20 +120,33 @@ DISNEY_PLUS = StreamingService(
     ),
 )
 
+# Bare UUID (hex + hyphens), the shape of Max video/entity ids.
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
 MAX = StreamingService(
     name="max",
     roku_channel_id=61322,
     domains=("max.com", "hbomax.com"),
     url_patterns=(
-        # Per roku-deeplink-spec:
-        # (?:max\.com|hbomax\.com)/(?:(?:movies|series|shows)/[^/]+/(?:s\d+/)?|(?:video/watch|play)/)([^/?]+)
-        # Supports /movies/{title}/, /series/{title}/, /shows/{title}/ (current
-        # site scheme, with an optional season segment like s1/), /video/watch/,
-        # and /play/ paths
+        # Episode pages: /shows/{slug}/s{N}/{show-uuid}/{episode-slug}/{episode-uuid}.
+        # The LAST uuid is the playable video id — device-verified 2026-08-15:
+        # the Max Roku app plays only video ids (episode/feature); a show-entity
+        # uuid deep-links to "This video is not available".
+        re.compile(rf"(?:max\.com|hbomax\.com)/shows/[^/]+/s\d+/{_UUID}/[^/?#]+/({_UUID})"),
+        # Show/movie/watch pages:
+        # /movies/{title}/, /series/{title}/, /shows/{title}/ (current site
+        # scheme, with an optional season segment like s1/), /video/watch/, and
+        # /play/ paths. A /shows/ or /series/ capture is the show-entity uuid,
+        # which search_and_play must resolve to an episode uuid before launch.
         re.compile(
             r"(?:max\.com|hbomax\.com)/(?:(?:movies|series|shows)/[^/]+/(?:s\d+/)?|(?:video/watch|play)/)([^/?]+)"
         ),
     ),
+    # Episode uuids launch as "episode" (resumes that episode's bookmark);
+    # show pages as "series" (with any episode uuid, the app smart-bookmarks
+    # to the next unwatched episode); movie/watch pages stay "movie".
+    pattern_media_types=("episode", None),
+    series_url_markers=("/shows/", "/series/"),
 )
 
 APPLE_TV_PLUS = StreamingService(
@@ -130,6 +154,12 @@ APPLE_TV_PLUS = StreamingService(
     roku_channel_id=551012,
     domains=("tv.apple.com",),
     url_patterns=(re.compile(r"tv\.apple\.com/(?:\w{2}/)?(?:show|movie|episode)/[^/]+/(umc\.cmc\.[a-z0-9]+)"),),
+    # Device-verified 2026-08-15: the Roku app ignores ECP deep links (show id
+    # + series, movie id + movie, /input, and search auto-launch all land on
+    # the app home). Launch-only, with no keypress — a blind Select on the home
+    # screen could activate a random tile.
+    post_launch_key=None,
+    supports_deep_link=False,
 )
 
 YOUTUBE = StreamingService(
@@ -234,13 +264,14 @@ def match_url_full(url: str, services: list[StreamingService] | None = None) -> 
         UrlMatchResult or None if no match.
     """
     for service in services or get_active_services():
-        for pattern in service.url_patterns:
+        for i, pattern in enumerate(service.url_patterns):
             m = pattern.search(url)
             if m:
+                override = service.pattern_media_types[i] if i < len(service.pattern_media_types) else None
                 return UrlMatchResult(
                     service=service,
                     content_id=m.group(1),
-                    media_type=service.get_media_type(m.group(0)),
+                    media_type=override or service.get_media_type(m.group(0)),
                     post_launch_key=service.post_launch_key,
                 )
     return None

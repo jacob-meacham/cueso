@@ -394,6 +394,34 @@ async def test_launch_tool_youtube_is_launch_only(mock_emby_client: AsyncMock) -
 
 
 @pytest.mark.asyncio
+async def test_launch_tool_registry_launch_only_beats_model_key(mock_emby_client: AsyncMock) -> None:
+    """A launch-only channel (registry post_launch_key=None) never gets a
+    keypress, even when the model passes the schema's Select default. Apple TV
+    (551012) is launch-only: its Roku app ignores deep links entirely
+    (device-verified 2026-08-15), and a blind Select on the app home screen
+    could activate a random tile."""
+    mock_http_client = AsyncMock()
+    ok = MagicMock()
+    ok.status_code = 200
+    mock_http_client.post.return_value = ok
+
+    executor = RokuECPToolExecutor("192.168.1.100", mock_http_client, emby_client=mock_emby_client)
+    result = await executor.execute_tool(
+        _tc(
+            "launch_on_roku",
+            {"channel_id": 551012, "content_id": "umc.cmc.1srk2goyh2q2zdxcx605w8vtx", "post_launch_key": "Select"},
+        )
+    )
+
+    payload = json.loads(result)
+    assert payload["success"] is True
+    assert mock_http_client.post.call_count == 1
+    assert "/launch/551012" in mock_http_client.post.call_args_list[0].args[0]
+    # The message must set expectations: the app opens but cannot auto-play.
+    assert "does not support deep link" in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_find_content_uses_emby(mock_emby_client: AsyncMock) -> None:
     """find_content works with Emby alone (no Brave configured)."""
     mock_http_client = AsyncMock()

@@ -3,12 +3,13 @@
 search_content() — Brave Search → URL match → verify → returns ALL matches across services.
 launch_on_roku()  — Execute action sequence: launch → wait 2000ms → keypress.
 
-Generated from spec library roku-deeplink v1.5.0 (speclib).
+Generated from spec library roku-deeplink v1.6.0 (speclib).
 """
 
 import asyncio
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass
 
 import httpx
@@ -25,6 +26,9 @@ logger = logging.getLogger("cueso.search_and_play")
 VERIFY_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 VERIFY_TIMEOUT_SECONDS = 5.0
 ORACLE_TIMEOUT_SECONDS = 2.0
+RESOLVE_TIMEOUT_SECONDS = 10.0
+
+_MAX_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 _EMBY_MEDIA_TYPES = {"Movie": "movie", "Series": "series", "Episode": "episode"}
 
@@ -41,6 +45,9 @@ class ContentMatch:
     media_type: str
     post_launch_key: str | None = "Select"  # Key to press after launch; None = launch-only (Emby)
     resume_position_ticks: int | None = None  # Emby resume position, when partially watched
+    # False when the channel's Roku app ignores deep links (Apple TV): the
+    # launch only opens the app, so the user must select the title manually.
+    deep_link: bool = True
     poster_url: str | None = None  # TMDB poster art for the searched title
     season: int | None = None  # Season/episode from the request, echoed for display
     episode: int | None = None
@@ -125,6 +132,41 @@ async def _verify_match(
     if response.status_code != 200:
         logger.warning("Verification probe returned %s for %s; accepting unverified", response.status_code, probe_url)
     return True
+
+
+async def _resolve_max_episode_id(
+    show_id: str,
+    page_url: str,
+    http_client: httpx.AsyncClient | None,
+) -> str | None:
+    """Resolve a Max show-entity uuid to a playable episode uuid.
+
+    Device-verified 2026-08-15: the Max Roku app plays only *video* ids — a
+    show-page uuid deep-links to "This video is not available", while any of
+    the show's episode uuids launched with mediaType=series smart-bookmarks to
+    the next unwatched episode. Show pages embed their episode links as
+    /shows/{slug}/s{N}/{show-uuid}/{episode-slug}/{episode-uuid}, so fetch the
+    page and take the first episode uuid whose path carries this show's uuid
+    (recommendation tiles for other shows never match).
+
+    Unlike the Prime probe this fails CLOSED (returns None): launching a show
+    uuid is a guaranteed-broken deep link, never worth falling back to.
+    """
+    if http_client is None:
+        return None
+    try:
+        response = await http_client.get(
+            page_url,
+            headers={"User-Agent": VERIFY_USER_AGENT},
+            follow_redirects=True,
+            timeout=RESOLVE_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.warning("Max episode resolution fetch failed for %s (%s)", page_url, e)
+        return None
+    match = re.search(rf"/s\d+/{re.escape(show_id)}/[^/?#\"'\s\\]+/({_MAX_UUID})", response.text)
+    return match.group(1) if match else None
 
 
 async def search_content(
@@ -301,22 +343,37 @@ async def _search_streaming(
                     result.url,
                 )
                 continue
+            content_id = matched.content_id
+            # A Max show page carries a show-entity uuid the Roku app cannot
+            # play; resolve it to an episode uuid (same §11 rejection semantics
+            # when the page yields none).
+            if matched.service.name == "max" and matched.media_type == "series":
+                episode_id = await _resolve_max_episode_id(content_id, result.url, http_client)
+                if episode_id is None:
+                    logger.info(
+                        "Rejected max candidate %s (no playable episode id on page): %s",
+                        content_id,
+                        result.url,
+                    )
+                    continue
+                content_id = episode_id
             seen_services.add(matched.service.name)
             matches.append(
                 ContentMatch(
                     service_name=matched.service.name,
                     channel_id=matched.service.roku_channel_id,
-                    content_id=matched.content_id,
+                    content_id=content_id,
                     source_url=result.url,
                     title=result.title,
                     media_type=media_type or matched.media_type,
                     post_launch_key=matched.post_launch_key,
+                    deep_link=matched.service.supports_deep_link,
                 )
             )
             logger.info(
                 "Matched: service=%s content_id=%s url=%s",
                 matched.service.name,
-                matched.content_id,
+                content_id,
                 result.url,
             )
 
@@ -335,6 +392,7 @@ async def launch_on_roku(
     media_type: str = "movie",
     post_launch_key: str | None = "Select",
     resume_position_ticks: int | None = None,
+    supports_deep_link: bool = True,
 ) -> LaunchResult:
     """Launch content on Roku via ECP using the roku-deeplink action sequence.
 
@@ -352,6 +410,9 @@ async def launch_on_roku(
         media_type: Roku mediaType param (default "movie").
         post_launch_key: Key to press after launch (default "Select"); None means launch-only.
         resume_position_ticks: Emby resume position, when partially watched.
+        supports_deep_link: False when the channel's Roku app ignores deep
+            links (Apple TV) — forces launch-only and an honest message that
+            the title must be selected manually.
 
     Returns:
         LaunchResult with success status.
@@ -366,6 +427,10 @@ async def launch_on_roku(
         post_launch_key = None
     else:
         params = {"contentId": content_id, "mediaType": media_type}
+        if not supports_deep_link:
+            # The app ignores deep links; never press a key after (a blind
+            # Select on the app home screen could activate a random tile).
+            post_launch_key = None
     logger.info("Launching Roku: POST %s params=%s", launch_url, params)
 
     try:
@@ -381,6 +446,15 @@ async def launch_on_roku(
         )
 
     if post_launch_key is None:
+        if not supports_deep_link:
+            return LaunchResult(
+                success=True,
+                message=(
+                    f"Opened channel {channel_id}. This channel's Roku app does not support deep links, "
+                    "so the title must be selected manually in the app."
+                ),
+                status_code=200,
+            )
         return LaunchResult(
             success=True,
             message=f"Launched channel {channel_id} with content ID {content_id} (launch-only).",

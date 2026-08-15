@@ -13,6 +13,7 @@ from app.core.streaming import (
     get_active_services,
     get_site_filters,
     match_url,
+    match_url_full,
 )
 
 
@@ -197,6 +198,54 @@ class TestMatchUrlMax:
         service, content_id = result
         assert service is MAX
         assert content_id == "abc123-def456"
+
+    def test_episode_url_captures_episode_uuid(self) -> None:
+        """Episode pages carry the playable video UUID as the LAST path segment.
+
+        Device-verified 2026-08-15: the Max Roku app only plays *video* ids
+        (episode/feature UUIDs); a show-page UUID deep-links to "This video is
+        not available".
+        """
+        result = match_url_full(
+            "https://www.max.com/shows/pitt-2024/s1/e6e7bad9-d48d-4434-b334-7c651ffc4bdf"
+            "/e1-700-am/e4b915fb-5e6b-42b8-97ac-90ec7d0e3147"
+        )
+        assert result is not None
+        assert result.service is MAX
+        assert result.content_id == "e4b915fb-5e6b-42b8-97ac-90ec7d0e3147"
+        assert result.media_type == "episode"
+
+    def test_show_page_media_type_is_series(self) -> None:
+        """Show pages yield the show UUID with media_type=series, marking the
+        match for episode-id resolution before launch (search_and_play)."""
+        result = match_url_full("https://www.max.com/shows/the-pitt/e6e7bad9-d48d-4434-b334-7c651ffc4bdf")
+        assert result is not None
+        assert result.service is MAX
+        assert result.content_id == "e6e7bad9-d48d-4434-b334-7c651ffc4bdf"
+        assert result.media_type == "series"
+
+    def test_video_watch_media_type_is_movie(self) -> None:
+        result = match_url_full("https://www.max.com/video/watch/bd43b2a4-1639-4197-96d4-2ec14eb45e9e")
+        assert result is not None
+        assert result.media_type == "movie"
+
+
+class TestAppleTVPlusLaunchOnly:
+    """Device-verified 2026-08-15: the Apple TV Roku app ignores ECP deep links
+    (show id + series, movie id + movie, /input, and search auto-launch all
+    land on the app home screen). The channel is therefore launch-only: no
+    post-launch keypress (a blind Select on the home screen could activate a
+    random tile), and matches are flagged so callers can warn the user."""
+
+    def test_no_post_launch_key(self) -> None:
+        assert APPLE_TV_PLUS.post_launch_key is None
+
+    def test_does_not_support_deep_link(self) -> None:
+        assert APPLE_TV_PLUS.supports_deep_link is False
+
+    def test_other_services_support_deep_link(self) -> None:
+        assert NETFLIX.supports_deep_link is True
+        assert MAX.supports_deep_link is True
 
 
 class TestMatchUrlAppleTVPlus:

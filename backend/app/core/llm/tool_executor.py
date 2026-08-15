@@ -99,7 +99,10 @@ TOOL_DEFINITIONS: list[Tool] = [
             "post_launch_key, and resume_position_ticks (Emby only, when partially "
             "watched). Emby matches are listed first. Use this when you know the exact "
             "content to find. After calling this, use launch_on_roku with the returned "
-            "values to play content."
+            "values to play content. Matches with deep_link=false (Apple TV+) can only "
+            "open the app — its Roku app ignores deep links — so when presenting or "
+            "launching one, tell the user they will need to select the title inside "
+            "the app themselves."
         ),
         input_schema={
             "type": "object",
@@ -273,17 +276,18 @@ class RokuECPToolExecutor(ToolExecutor):
             return json.dumps({"success": False, "message": "channel_id and content_id are required."})
 
         channel = int(channel_id)
-        # Emby is launch-only: never press a key, whatever the model passed.
-        if channel == EMBY_CHANNEL_ID:
+        from ..streaming import service_for_channel
+
+        service = service_for_channel(channel)
+        # Launch-only channels (Emby, YouTube, Apple TV) never get a keypress,
+        # whatever the model passed — the registry outranks the model here.
+        if channel == EMBY_CHANNEL_ID or (service is not None and service.post_launch_key is None):
             post_launch_key: str | None = None
         elif arguments.get("post_launch_key"):
             post_launch_key = arguments["post_launch_key"]
         else:
             # Model omitted it (or passed null): the channel registry knows the
-            # right key — Play for Netflix, none at all for YouTube (launch-only).
-            from ..streaming import service_for_channel
-
-            service = service_for_channel(channel)
+            # right key — Play for Netflix, Select for most others.
             post_launch_key = service.post_launch_key if service is not None else "Select"
 
         resume_ticks = arguments.get("resume_position_ticks")
@@ -296,5 +300,6 @@ class RokuECPToolExecutor(ToolExecutor):
             media_type=media_type,
             post_launch_key=post_launch_key,
             resume_position_ticks=int(resume_ticks) if resume_ticks is not None else None,
+            supports_deep_link=service.supports_deep_link if service is not None else True,
         )
         return json.dumps({"success": result.success, "message": result.message})

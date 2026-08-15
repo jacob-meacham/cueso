@@ -276,6 +276,176 @@ class TestSearchContentVerification:
         assert result.matches[0].content_id == "B0002V7TDI"
 
 
+_PITT_SHOW_URL = "https://www.max.com/shows/the-pitt/e6e7bad9-d48d-4434-b334-7c651ffc4bdf"
+_PITT_SHOW_ID = "e6e7bad9-d48d-4434-b334-7c651ffc4bdf"
+_PITT_EP1_ID = "e4b915fb-5e6b-42b8-97ac-90ec7d0e3147"
+# Show-page HTML embeds episode links as /shows/{slug}/s{N}/{show-uuid}/{ep-slug}/{ep-uuid}.
+# The decoy is another show's episode link (recommendation tile): resolution
+# must only accept episode ids whose path carries OUR show uuid.
+_PITT_PAGE_HTML = (
+    '<a href="/shows/white-lotus/s1/14f9834d-bc23-41a8-ab61-5c8abdbea505'
+    '/e1-arrivals/deadbeef-0000-4000-8000-000000000000">decoy</a>'
+    f'<a href="/shows/pitt-2024/s1/{_PITT_SHOW_ID}/e1-700-am/{_PITT_EP1_ID}">E1</a>'
+)
+
+
+def _page_response(html: str) -> MagicMock:
+    response = MagicMock()
+    response.status_code = 200
+    response.text = html
+    return response
+
+
+class TestMaxShowResolution:
+    """Max show-page matches resolve to a playable episode UUID before launch.
+
+    Device-verified 2026-08-15: the Max Roku app rejects show-entity UUIDs
+    ("This video is not available") but plays any of the show's episode UUIDs;
+    with mediaType=series it smart-bookmarks to the next unwatched episode
+    regardless of which episode uuid is passed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_show_page_resolves_to_episode_id(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        mock_brave_client.search.return_value = [
+            SearchResult(title="The Pitt | Max", url=_PITT_SHOW_URL, description="")
+        ]
+        mock_http_client.get.return_value = _page_response(_PITT_PAGE_HTML)
+
+        result = await search_content(
+            title="The Pitt",
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert len(result.matches) == 1
+        match = result.matches[0]
+        assert match.service_name == "max"
+        assert match.content_id == _PITT_EP1_ID
+        assert match.media_type == "series"
+        # Resolution fetched the show page itself
+        fetched_url = mock_http_client.get.call_args[0][0]
+        assert fetched_url == _PITT_SHOW_URL
+
+    @pytest.mark.asyncio
+    async def test_unresolvable_show_page_does_not_block_service(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        """Spec §11 semantics: a rejected candidate must not satisfy or block
+        its service — a later playable URL can still claim it."""
+        mock_brave_client.search.return_value = [
+            SearchResult(title="The Pitt | Max", url=_PITT_SHOW_URL, description=""),
+            SearchResult(
+                title="Watch The Pitt",
+                url="https://www.max.com/video/watch/bd43b2a4-1639-4197-96d4-2ec14eb45e9e",
+                description="",
+            ),
+        ]
+        mock_http_client.get.return_value = _page_response("<html>no episode links here</html>")
+
+        result = await search_content(
+            title="The Pitt",
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert len(result.matches) == 1
+        assert result.matches[0].content_id == "bd43b2a4-1639-4197-96d4-2ec14eb45e9e"
+
+    @pytest.mark.asyncio
+    async def test_fetch_error_drops_candidate(self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock) -> None:
+        """A show uuid is a guaranteed-broken launch, so unlike the Prime probe
+        this step fails CLOSED: no resolution, no match."""
+        mock_brave_client.search.return_value = [
+            SearchResult(title="The Pitt | Max", url=_PITT_SHOW_URL, description="")
+        ]
+        mock_http_client.get.side_effect = httpx.ConnectError("boom")
+
+        result = await search_content(
+            title="The Pitt",
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is False
+        assert result.matches == []
+
+    @pytest.mark.asyncio
+    async def test_episode_url_needs_no_resolution(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        episode_url = f"https://www.max.com/shows/pitt-2024/s1/{_PITT_SHOW_ID}/e1-700-am/{_PITT_EP1_ID}"
+        mock_brave_client.search.return_value = [SearchResult(title="E1", url=episode_url, description="")]
+
+        result = await search_content(
+            title="The Pitt",
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == _PITT_EP1_ID
+        assert result.matches[0].media_type == "episode"
+        mock_http_client.get.assert_not_called()
+
+
+class TestDeepLinkFlag:
+    """Matches carry deep_link so callers can warn when a launch only opens the app."""
+
+    @pytest.mark.asyncio
+    async def test_apple_tv_match_flagged_no_deep_link(self, mock_brave_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [
+            SearchResult(
+                title="Severance",
+                url="https://tv.apple.com/us/show/severance/umc.cmc.1srk2goyh2q2zdxcx605w8vtx",
+                description="",
+            )
+        ]
+
+        result = await search_content(title="Severance", brave_client=mock_brave_client)
+
+        assert result.matches[0].service_name == "apple_tv_plus"
+        assert result.matches[0].deep_link is False
+
+    @pytest.mark.asyncio
+    async def test_netflix_match_flagged_deep_link(self, mock_brave_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [
+            SearchResult(title="The Bear", url="https://www.netflix.com/title/81231974", description="")
+        ]
+
+        result = await search_content(title="The Bear", brave_client=mock_brave_client)
+
+        assert result.matches[0].deep_link is True
+
+
+class TestLaunchOnRokuNoDeepLink:
+    """Channels whose Roku app ignores deep links (Apple TV) get an honest message."""
+
+    @pytest.mark.asyncio
+    async def test_message_says_manual_selection_needed(self, mock_http_client: AsyncMock) -> None:
+        ok = MagicMock()
+        ok.status_code = 200
+        mock_http_client.post.return_value = ok
+
+        result = await launch_on_roku(
+            channel_id=551012,
+            content_id="umc.cmc.1srk2goyh2q2zdxcx605w8vtx",
+            roku_base_url=ROKU_BASE_URL,
+            http_client=mock_http_client,
+            post_launch_key=None,
+            supports_deep_link=False,
+        )
+
+        assert result.success is True
+        assert mock_http_client.post.call_count == 1  # launch only, no keypress
+        assert "does not support deep link" in result.message
+        assert "manually" in result.message
+
+
 class TestSearchContentFailures:
     @pytest.mark.asyncio
     async def test_no_search_results(self, mock_brave_client: AsyncMock) -> None:

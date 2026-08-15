@@ -126,7 +126,7 @@
         "channel_id": "61322",
         "channel_name": "HBO Max",
         "content_id": "14f9834d-bc23-41a8-ab61-5c8abdbea505",
-        "media_type": "movie",
+        "media_type": "series",
         "post_launch_key": "Select"
       }
     },
@@ -136,7 +136,17 @@
         "channel_id": "61322",
         "channel_name": "HBO Max",
         "content_id": "14f9834d-bc23-41a8-ab61-5c8abdbea505",
-        "media_type": "movie",
+        "media_type": "series",
+        "post_launch_key": "Select"
+      }
+    },
+    {
+      "url": "https://www.max.com/shows/pitt-2024/s1/e6e7bad9-d48d-4434-b334-7c651ffc4bdf/e1-700-am/e4b915fb-5e6b-42b8-97ac-90ec7d0e3147",
+      "expected": {
+        "channel_id": "61322",
+        "channel_name": "HBO Max",
+        "content_id": "e4b915fb-5e6b-42b8-97ac-90ec7d0e3147",
+        "media_type": "episode",
         "post_launch_key": "Select"
       }
     },
@@ -146,7 +156,7 @@
         "channel_id": "61322",
         "channel_name": "HBO Max",
         "content_id": "abc-123",
-        "media_type": "movie",
+        "media_type": "series",
         "post_launch_key": "Select"
       }
     },
@@ -217,7 +227,7 @@
         "channel_name": "Apple TV+",
         "content_id": "umc.cmc.1srk2goyh2q2zdxcx605w8vtx",
         "media_type": "movie",
-        "post_launch_key": "Select"
+        "deep_link": false
       }
     },
     {
@@ -227,7 +237,7 @@
         "channel_name": "Apple TV+",
         "content_id": "umc.cmc.5x1fg9gl9mwn7qzd3s6ztph5p",
         "media_type": "movie",
-        "post_launch_key": "Select"
+        "deep_link": false
       }
     },
     {
@@ -514,8 +524,7 @@
         "channel_id": "551012",
         "channel_name": "Apple TV+",
         "content_id": "umc.cmc.1srk2goyh2q2zdxcx605w8vtx",
-        "media_type": "movie",
-        "post_launch_key": "Select"
+        "media_type": "movie"
       },
       "expected": {
         "type": "action_sequence",
@@ -524,15 +533,6 @@
             "type": "launch",
             "channel_id": "551012",
             "params": "contentId=umc.cmc.1srk2goyh2q2zdxcx605w8vtx&mediaType=movie"
-          },
-          {
-            "type": "wait",
-            "milliseconds": 2000
-          },
-          {
-            "type": "keypress",
-            "key": "Select",
-            "count": 1
           }
         ]
       }

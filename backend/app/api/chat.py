@@ -230,6 +230,7 @@ async def roku_launch(
         media_type=media_type,
         post_launch_key=post_launch_key,
         resume_position_ticks=resume_position_ticks,
+        supports_deep_link=service.supports_deep_link if service is not None else True,
     )
     return {"success": result.success, "message": result.message}
 

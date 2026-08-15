@@ -1,6 +1,6 @@
 """Fixture-driven conformance tests for cueso's LIVE Roku deep-link path.
 
-These validate the roku-deeplink spec (v1.5.0) against the code that actually
+These validate the roku-deeplink spec (v1.6.0) against the code that actually
 runs in production -- NOT a standalone module. The live path is:
 
     api/chat.py -> llm/tool_executor.py -> search_and_play.py -> streaming.py
@@ -16,7 +16,7 @@ Spec Function 2 ``build_playback_command(descriptor) -> action_sequence``
     sequence matches the fixture's action list.
 
 Fixtures come from the spec's canonical ``test_fixtures.json`` (materialized by
-speclib at v1.5.0 into ``tests/roku_deeplink_fixtures.json``).
+speclib at v1.6.0 into ``tests/roku_deeplink_fixtures.json``).
 
 The spec's Prime Video verification probe (§4) and web-search sourcing rules
 (§11) are live-HTTP concerns, not fixture-testable; they are covered by unit
@@ -100,9 +100,12 @@ class TestSpecFunction1ValidUrls:
         assert channel_name == expected["channel_name"]
         assert result.content_id == expected["content_id"]
         assert result.media_type == expected["media_type"]
-        # Launch-only channels (YouTube) omit post_launch_key in the fixture;
-        # the live result must agree by carrying None.
+        # Launch-only channels (YouTube, Apple TV+) omit post_launch_key in the
+        # fixture; the live result must agree by carrying None.
         assert result.post_launch_key == expected.get("post_launch_key")
+        # Channels whose Roku app ignores deep links (Apple TV+) carry
+        # deep_link: false in the fixture; the live registry must agree.
+        assert result.service.supports_deep_link == expected.get("deep_link", True)
 
 
 class TestSpecFunction1InvalidUrls:
