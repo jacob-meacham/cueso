@@ -1,6 +1,6 @@
 """Streaming service registry for content ID extraction and Roku deep linking.
 
-Generated from spec library roku-deeplink v1.6.1 (speclib).
+Generated from spec library roku-deeplink v1.7.0 (speclib).
 """
 
 import logging

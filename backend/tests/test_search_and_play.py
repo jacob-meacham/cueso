@@ -279,6 +279,8 @@ class TestSearchContentVerification:
 _PITT_SHOW_URL = "https://www.max.com/shows/the-pitt/e6e7bad9-d48d-4434-b334-7c651ffc4bdf"
 _PITT_SHOW_ID = "e6e7bad9-d48d-4434-b334-7c651ffc4bdf"
 _PITT_EP1_ID = "e4b915fb-5e6b-42b8-97ac-90ec7d0e3147"
+_PITT_EP5_ID = "4b9b46c8-73b5-4e1d-9c1b-5b63e4412f38"
+_PITT_EP1_URL = f"https://www.max.com/shows/pitt-2024/s1/{_PITT_SHOW_ID}/e1-700-am/{_PITT_EP1_ID}"
 # Show-page HTML embeds episode links as /shows/{slug}/s{N}/{show-uuid}/{ep-slug}/{ep-uuid}.
 # The decoy is another show's episode link (recommendation tile): resolution
 # must only accept episode ids whose path carries OUR show uuid.
@@ -286,6 +288,7 @@ _PITT_PAGE_HTML = (
     '<a href="/shows/white-lotus/s1/14f9834d-bc23-41a8-ab61-5c8abdbea505'
     '/e1-arrivals/deadbeef-0000-4000-8000-000000000000">decoy</a>'
     f'<a href="/shows/pitt-2024/s1/{_PITT_SHOW_ID}/e1-700-am/{_PITT_EP1_ID}">E1</a>'
+    f'<a href="/shows/pitt-2024/s1/{_PITT_SHOW_ID}/e5-1100-am/{_PITT_EP5_ID}">E5</a>'
 )
 
 
@@ -376,11 +379,13 @@ class TestMaxShowResolution:
         assert result.matches == []
 
     @pytest.mark.asyncio
-    async def test_episode_url_needs_no_resolution(
+    async def test_episode_url_without_episode_request_resumes_series(
         self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
     ) -> None:
-        episode_url = f"https://www.max.com/shows/pitt-2024/s1/{_PITT_SHOW_ID}/e1-700-am/{_PITT_EP1_ID}"
-        mock_brave_client.search.return_value = [SearchResult(title="E1", url=episode_url, description="")]
+        """Show-level intent ("resume watching X") launches ANY video uuid with
+        mediaType=series — even when search surfaced an episode page. No fetch
+        needed: under series the passed uuid does not select the episode."""
+        mock_brave_client.search.return_value = [SearchResult(title="E1", url=_PITT_EP1_URL, description="")]
 
         result = await search_content(
             title="The Pitt",
@@ -390,8 +395,114 @@ class TestMaxShowResolution:
 
         assert result.success is True
         assert result.matches[0].content_id == _PITT_EP1_ID
+        assert result.matches[0].media_type == "series"
+        mock_http_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_caller_media_type_never_overrides_max_resolution(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        """Max mediaType is a launch parameter with device-verified semantics,
+        paired to the id the resolver chose — the LLM's generic classification
+        must not override it (media_type="movie" on an episode uuid would
+        restart the show's current episode from 0:00)."""
+        mock_brave_client.search.return_value = [SearchResult(title="E1", url=_PITT_EP1_URL, description="")]
+
+        result = await search_content(
+            title="The Pitt",
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+            media_type="movie",
+        )
+
+        assert result.matches[0].media_type == "series"
+
+
+class TestMaxRequestedEpisode:
+    """A specific-episode request must launch THAT episode's uuid with
+    mediaType=episode (plays the passed episode, resuming its bookmark)."""
+
+    @pytest.mark.asyncio
+    async def test_matching_episode_url_used_directly(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        ep5_url = f"https://www.max.com/shows/pitt-2024/s1/{_PITT_SHOW_ID}/e5-1100-am/{_PITT_EP5_ID}"
+        mock_brave_client.search.return_value = [SearchResult(title="E5", url=ep5_url, description="")]
+
+        result = await search_content(
+            title="The Pitt",
+            season=1,
+            episode=5,
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == _PITT_EP5_ID
         assert result.matches[0].media_type == "episode"
         mock_http_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolved_from_show_page(self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock) -> None:
+        mock_brave_client.search.return_value = [
+            SearchResult(title="The Pitt | Max", url=_PITT_SHOW_URL, description="")
+        ]
+        mock_http_client.get.return_value = _page_response(_PITT_PAGE_HTML)
+
+        result = await search_content(
+            title="The Pitt",
+            season=1,
+            episode=5,
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == _PITT_EP5_ID
+        assert result.matches[0].media_type == "episode"
+
+    @pytest.mark.asyncio
+    async def test_wrong_episode_url_refetched_for_requested_episode(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        """Search surfaced E1's page but the user asked for E5: fetch the page
+        and pull E5's uuid from the embedded episode links."""
+        mock_brave_client.search.return_value = [SearchResult(title="E1", url=_PITT_EP1_URL, description="")]
+        mock_http_client.get.return_value = _page_response(_PITT_PAGE_HTML)
+
+        result = await search_content(
+            title="The Pitt",
+            season=1,
+            episode=5,
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is True
+        assert result.matches[0].content_id == _PITT_EP5_ID
+        assert result.matches[0].media_type == "episode"
+
+    @pytest.mark.asyncio
+    async def test_requested_episode_missing_rejects_candidate(
+        self, mock_brave_client: AsyncMock, mock_http_client: AsyncMock
+    ) -> None:
+        """Fail closed: launching some other episode for an S2E9 request is a
+        wrong-content surprise, so the candidate is rejected instead."""
+        mock_brave_client.search.return_value = [
+            SearchResult(title="The Pitt | Max", url=_PITT_SHOW_URL, description="")
+        ]
+        mock_http_client.get.return_value = _page_response(_PITT_PAGE_HTML)  # s1 links only
+
+        result = await search_content(
+            title="The Pitt",
+            season=2,
+            episode=9,
+            brave_client=mock_brave_client,
+            http_client=mock_http_client,
+        )
+
+        assert result.success is False
+        assert result.matches == []
 
 
 class TestDeepLinkFlag:

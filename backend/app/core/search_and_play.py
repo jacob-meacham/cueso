@@ -3,7 +3,7 @@
 search_content() — Brave Search → URL match → verify → returns ALL matches across services.
 launch_on_roku()  — Execute action sequence: launch → wait 2000ms → keypress.
 
-Generated from spec library roku-deeplink v1.6.1 (speclib).
+Generated from spec library roku-deeplink v1.7.0 (speclib).
 """
 
 import asyncio
@@ -134,25 +134,36 @@ async def _verify_match(
     return True
 
 
-async def _resolve_max_episode_id(
-    show_id: str,
-    page_url: str,
-    http_client: httpx.AsyncClient | None,
-) -> str | None:
-    """Resolve a Max show-entity uuid to a playable episode uuid.
+# Season and episode numbers in a Max episode-page path:
+# /s{N}/{show-uuid}/e{E}-{slug}/{episode-uuid}
+_MAX_EPISODE_PATH = re.compile(rf"/s(\d+)/{_MAX_UUID}/e(\d+)(?:-[^/?#]*)?/{_MAX_UUID}")
 
-    Device-verified 2026-08-15: the Max Roku app plays only *video* ids — a
-    show-page uuid deep-links to "This video is not available", while any of
-    the show's episode uuids launched with mediaType=series resumes the
-    account's series position (the passed uuid does not select the episode:
-    passing S1E5's uuid resumed S1E2 at its bookmark). Show pages embed their
-    episode links as
-    /shows/{slug}/s{N}/{show-uuid}/{episode-slug}/{episode-uuid}, so fetch the
-    page and take the first episode uuid whose path carries this show's uuid
+
+def _max_episode_link_pattern(show_id: str, season: int | None, episode: int | None) -> re.Pattern[str]:
+    """Pattern for an episode link on a Max page, anchored to the show uuid
     (recommendation tiles for other shows never match).
 
-    Unlike the Prime probe this fails CLOSED (returns None): launching a show
-    uuid is a guaranteed-broken deep link, never worth falling back to.
+    With an episode number the link must be that episode — any season when the
+    request omitted one; otherwise any of the show's episode links matches.
+    """
+    slug = r"[^/?#\"'\s\\]"
+    season_part = str(season) if season is not None else r"\d+"
+    episode_part = rf"e{episode}(?:-{slug}*)?" if episode is not None else rf"{slug}+"
+    return re.compile(rf"/s{season_part}/{re.escape(show_id)}/{episode_part}/({_MAX_UUID})")
+
+
+async def _find_max_episode_id(
+    show_id: str,
+    page_url: str,
+    season: int | None,
+    episode: int | None,
+    http_client: httpx.AsyncClient | None,
+) -> str | None:
+    """Fetch a Max page and pull an episode uuid from its embedded links.
+
+    Fails CLOSED (None) on any miss, unlike the Prime probe: a show uuid is a
+    guaranteed-broken deep link and a wrong episode is a wrong-content
+    surprise — neither is worth falling back to.
     """
     if http_client is None:
         return None
@@ -167,8 +178,54 @@ async def _resolve_max_episode_id(
     except httpx.HTTPError as e:
         logger.warning("Max episode resolution fetch failed for %s (%s)", page_url, e)
         return None
-    match = re.search(rf"/s\d+/{re.escape(show_id)}/[^/?#\"'\s\\]+/({_MAX_UUID})", response.text)
+    match = _max_episode_link_pattern(show_id, season, episode).search(response.text)
     return match.group(1) if match else None
+
+
+async def _resolve_max_launch(
+    matched: UrlMatchResult,
+    source_url: str,
+    season: int | None,
+    episode: int | None,
+    http_client: httpx.AsyncClient | None,
+) -> tuple[str, str] | None:
+    """Map the user's intent onto a playable Max launch: (content_id, media_type).
+
+    Device-verified 2026-08-15 mediaType semantics against video ids:
+    "episode" plays the passed episode resuming its bookmark; "series" ignores
+    the passed uuid and resumes the account's series position; a show-entity
+    uuid is unplayable ("This video is not available") whatever the mediaType.
+    Hence:
+
+    - No requested episode ("watch/resume show X"): any video uuid + "series".
+      An episode-page capture is used as-is; a show-page capture resolves to
+      the first episode link scraped from the page.
+    - Requested episode: that episode's uuid + "episode". The matched URL's
+      capture is used when its path is already that episode's; otherwise the
+      page is fetched and searched for /s{S}/{show-uuid}/e{E}-…/{uuid}.
+
+    Returns None (reject the candidate, spec §11 semantics) when no suitable
+    episode uuid can be found.
+    """
+    if episode is None:
+        if matched.media_type == "episode":
+            return matched.content_id, "series"
+        episode_id = await _find_max_episode_id(matched.content_id, source_url, None, None, http_client)
+        return (episode_id, "series") if episode_id is not None else None
+
+    if matched.media_type == "episode":
+        path = _MAX_EPISODE_PATH.search(source_url)
+        if path is not None and int(path.group(2)) == episode and (season is None or int(path.group(1)) == season):
+            return matched.content_id, "episode"
+        # Wrong episode's page; its show uuid sits before the episode segment.
+        show_match = re.search(rf"/s\d+/({_MAX_UUID})/", source_url)
+        if show_match is None:
+            return None
+        show_id = show_match.group(1)
+    else:
+        show_id = matched.content_id
+    episode_id = await _find_max_episode_id(show_id, source_url, season, episode, http_client)
+    return (episode_id, "episode") if episode_id is not None else None
 
 
 async def search_content(
@@ -210,7 +267,7 @@ async def search_content(
 
     emby_matches, streaming = await asyncio.gather(
         _search_emby(emby_client, title, season, episode, media_type),
-        _search_streaming(brave_client, base_query, media_type, services, http_client),
+        _search_streaming(brave_client, base_query, media_type, services, http_client, season, episode),
     )
     streaming_matches, streaming_failure = streaming
 
@@ -305,8 +362,13 @@ async def _search_streaming(
     media_type: str | None,
     services: list[StreamingService] | None,
     http_client: httpx.AsyncClient | None,
+    season: int | None = None,
+    episode: int | None = None,
 ) -> tuple[list[ContentMatch], str | None]:
     """Search the web for streaming-service URLs.
+
+    season/episode carry the user's intent into per-service launch resolution
+    (Max needs them to pick the right episode uuid and mediaType).
 
     Returns (matches, failure_message); failure_message is None on success.
     """
@@ -346,19 +408,22 @@ async def _search_streaming(
                 )
                 continue
             content_id = matched.content_id
-            # A Max show page carries a show-entity uuid the Roku app cannot
-            # play; resolve it to an episode uuid (same §11 rejection semantics
-            # when the page yields none).
-            if matched.service.name == "max" and matched.media_type == "series":
-                episode_id = await _resolve_max_episode_id(content_id, result.url, http_client)
-                if episode_id is None:
+            match_media_type = media_type or matched.media_type
+            # Max show/episode captures go through intent-driven resolution:
+            # the resolver pairs an episode uuid with the mediaType whose
+            # device-verified semantics match the request, so its answer
+            # outranks the caller's generic media_type classification. Same
+            # §11 rejection semantics when it fails.
+            if matched.service.name == "max" and matched.media_type in ("series", "episode"):
+                resolved = await _resolve_max_launch(matched, result.url, season, episode, http_client)
+                if resolved is None:
                     logger.info(
-                        "Rejected max candidate %s (no playable episode id on page): %s",
-                        content_id,
+                        "Rejected max candidate %s (no episode id for the request): %s",
+                        matched.content_id,
                         result.url,
                     )
                     continue
-                content_id = episode_id
+                content_id, match_media_type = resolved
             seen_services.add(matched.service.name)
             matches.append(
                 ContentMatch(
@@ -367,7 +432,7 @@ async def _search_streaming(
                     content_id=content_id,
                     source_url=result.url,
                     title=result.title,
-                    media_type=media_type or matched.media_type,
+                    media_type=match_media_type,
                     post_launch_key=matched.post_launch_key,
                     deep_link=matched.service.supports_deep_link,
                 )
