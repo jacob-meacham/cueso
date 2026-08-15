@@ -3,7 +3,7 @@
 search_content() — Brave Search → URL match → verify → returns ALL matches across services.
 launch_on_roku()  — Execute action sequence: launch → wait 2000ms → keypress.
 
-Generated from spec library roku-deeplink v1.6.0 (speclib).
+Generated from spec library roku-deeplink v1.6.1 (speclib).
 """
 
 import asyncio
@@ -143,8 +143,10 @@ async def _resolve_max_episode_id(
 
     Device-verified 2026-08-15: the Max Roku app plays only *video* ids — a
     show-page uuid deep-links to "This video is not available", while any of
-    the show's episode uuids launched with mediaType=series smart-bookmarks to
-    the next unwatched episode. Show pages embed their episode links as
+    the show's episode uuids launched with mediaType=series resumes the
+    account's series position (the passed uuid does not select the episode:
+    passing S1E5's uuid resumed S1E2 at its bookmark). Show pages embed their
+    episode links as
     /shows/{slug}/s{N}/{show-uuid}/{episode-slug}/{episode-uuid}, so fetch the
     page and take the first episode uuid whose path carries this show's uuid
     (recommendation tiles for other shows never match).

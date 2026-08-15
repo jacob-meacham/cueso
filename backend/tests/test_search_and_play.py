@@ -301,8 +301,9 @@ class TestMaxShowResolution:
 
     Device-verified 2026-08-15: the Max Roku app rejects show-entity UUIDs
     ("This video is not available") but plays any of the show's episode UUIDs;
-    with mediaType=series it smart-bookmarks to the next unwatched episode
-    regardless of which episode uuid is passed.
+    with mediaType=series it resumes the account's series position — the
+    passed uuid does not select the episode (S1E5's uuid resumed S1E2 at its
+    bookmark).
     """
 
     @pytest.mark.asyncio

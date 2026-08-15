@@ -1,6 +1,6 @@
 """Streaming service registry for content ID extraction and Roku deep linking.
 
-Generated from spec library roku-deeplink v1.6.0 (speclib).
+Generated from spec library roku-deeplink v1.6.1 (speclib).
 """
 
 import logging
@@ -143,8 +143,9 @@ MAX = StreamingService(
         ),
     ),
     # Episode uuids launch as "episode" (resumes that episode's bookmark);
-    # show pages as "series" (with any episode uuid, the app smart-bookmarks
-    # to the next unwatched episode); movie/watch pages stay "movie".
+    # show pages as "series" (the app ignores which episode uuid was passed
+    # and resumes the account's series position); movie/watch pages stay
+    # "movie".
     pattern_media_types=("episode", None),
     series_url_markers=("/shows/", "/series/"),
 )
