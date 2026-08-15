@@ -81,7 +81,8 @@ export default function InputBar({
           </button>
         )}
 
-        {/* Text input */}
+        {/* Text input — text-base (16px) minimum: iOS Safari auto-zooms the
+            page when focusing any input below 16px and never zooms back out */}
         <input
           ref={inputRef}
           type="text"
@@ -89,7 +90,7 @@ export default function InputBar({
           onChange={(e) => setInput(e.target.value)}
           placeholder={isListening ? "Listening..." : "Ask about a show or movie..."}
           disabled={disabled || isListening}
-          className="flex-1 rounded-xl border border-white/10 bg-slate-800/80 px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-indigo-500 disabled:opacity-50"
+          className="flex-1 rounded-xl border border-white/10 bg-slate-800/80 px-4 py-2.5 text-base text-slate-100 placeholder-slate-500 outline-none focus:border-indigo-500 disabled:opacity-50"
           autoComplete="off"
         />
 

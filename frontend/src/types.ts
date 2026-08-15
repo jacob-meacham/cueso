@@ -9,6 +9,9 @@ export type ContentMatch = {
   season?: number | null;
   episode?: number | null;
   resume_position_ticks?: number | null;
+  // False when the channel's Roku app ignores deep links (Apple TV):
+  // launching only opens the app, the user picks the title there.
+  deep_link?: boolean;
 };
 
 export type ChatMessage = {

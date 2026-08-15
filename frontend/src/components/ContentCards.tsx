@@ -51,6 +51,9 @@ export default function ContentCards({ matches, onLaunch, launching }: Props) {
         const isLaunching = launching === match.content_id;
         const canResume =
           match.service_name === "emby" && match.resume_position_ticks != null;
+        // deep_link=false (Apple TV): launch only opens the app, the user
+        // picks the title there — don't promise "Play".
+        const opensAppOnly = match.deep_link === false;
 
         return (
           <div
@@ -86,7 +89,13 @@ export default function ContentCards({ matches, onLaunch, launching }: Props) {
                 disabled={isLaunching}
                 className="mt-3 w-full cursor-pointer rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-50"
               >
-                {isLaunching ? "Launching..." : canResume ? "Resume" : "Play"}
+                {isLaunching
+                  ? "Launching..."
+                  : opensAppOnly
+                    ? "Open App"
+                    : canResume
+                      ? "Resume"
+                      : "Play"}
               </button>
             </div>
           </div>
